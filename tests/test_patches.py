@@ -117,6 +117,12 @@ class PatchTests(unittest.TestCase):
         self.assertIn("diff --git a/Assets/Scripts/B.cs b/Assets/Scripts/B.cs", p.read_text())
         self.assertNotIn("game-pristine", p.read_text())
 
+    def test_missing_pristine_raises(self):
+        with self.assertRaises(PatchError) as cm:
+            patches.make(self.project, "080-np", ["Assets/Scripts/A.cs"], pristine=self.project.parent / "nope",
+                         patch_dir=self.pdir)
+        self.assertIn("pristine", str(cm.exception))
+
     def test_no_changes_makes_nothing(self):
         with self.assertRaises(PatchError):
             patches.make(self.project, "040-empty", ["Assets/Scripts/A.cs"], pristine=self.pristine, patch_dir=self.pdir)

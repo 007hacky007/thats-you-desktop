@@ -64,7 +64,12 @@ def make(project: Path, name: str, paths: list[str], pristine: Path | None = Non
     Unity rewrites many files when it imports the project, so diffing everything would capture
     Unity's own changes; name exactly the files you changed, added or deleted."""
     project = Path(project).resolve()
-    pristine = (Path(pristine) if pristine else project.with_name(project.name + "-pristine")).resolve()
+    if pristine is None:
+        from pipeline import config
+        pristine = config.load().work_dir / "export" / "game" / "ExportedProject"
+    pristine = Path(pristine).resolve()
+    if not pristine.is_dir():
+        raise PatchError(name, f"pristine export not found: {pristine}")
     rels = set()
     for rel in paths:
         rel = Path(rel).as_posix()

@@ -38,6 +38,14 @@ class PrepareProjectTests(unittest.TestCase):
         self.assertEqual((self.project / "Assets/A.cs").read_text(), "class A { int x; }\n")
         self.assertEqual((self.project / "Library/cache").read_text(), "big")
 
+    def test_changed_pristine_rebuilds(self):
+        (self.pristine / ".export-complete").write_text("export-v1")
+        build_all.prepare_project(self.pristine, self.project, self.pdir)
+        (self.pristine / ".export-complete").write_text("export-v2")
+        (self.pristine / "Assets/A.cs").write_text("class A2 {}\n")
+        self.assertTrue(build_all.prepare_project(self.pristine, self.project, self.pdir))
+        self.assertEqual((self.project / "Assets/A.cs").read_text(), "class A2 {}\n")
+
 
 class UnityEditorCheckTests(unittest.TestCase):
     def test_missing_editor_names_key(self):

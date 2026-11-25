@@ -31,7 +31,8 @@ def prepare_project(pristine: Path, project: Path, patch_dir: Path) -> bool:
     """(Re)build the working project from the pristine export when patches changed.
 
     Returns True when the project was rebuilt. Unity's Library cache is kept."""
-    digest = _patch_digest(patch_dir)
+    pristine_marker = pristine / ".export-complete"
+    digest = _patch_digest(patch_dir) + ":" + (pristine_marker.read_text() if pristine_marker.is_file() else "")
     state = project / PROJECT_MARKER
     if state.is_file() and json.loads(state.read_text()).get("patches") == digest:
         return False

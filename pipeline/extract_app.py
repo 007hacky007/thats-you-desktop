@@ -27,10 +27,15 @@ LIB = Path("lib/arm64-v8a/libil2cpp.so")
 METADATA = Path("assets/bin/Data/Managed/Metadata/global-metadata.dat")
 
 
+def apk_key(apk: Path) -> str:
+    st = Path(apk).stat()
+    return f"{Path(apk).name}:{st.st_size}:{st.st_mtime_ns}"
+
+
 def unzip_apk(apk: Path, dest: Path) -> None:
     dest = Path(dest)
     marker = dest / ".unzip-complete"
-    if marker.is_file():
+    if marker.is_file() and marker.read_text() == apk_key(apk):
         return
     with zipfile.ZipFile(apk) as z:
         for info in z.infolist():
@@ -39,7 +44,7 @@ def unzip_apk(apk: Path, dest: Path) -> None:
         if dest.exists():
             shutil.rmtree(dest)
         z.extractall(dest)
-    marker.write_text("ok")
+    marker.write_text(apk_key(apk))
 
 
 DUMP_OUTPUTS = ("dump.cs", "script.json", "il2cpp.h", "DummyDll")
@@ -81,7 +86,9 @@ def main() -> None:
     apk_dir = c.work_dir / "apk"
     unzip_apk(c.apk, apk_dir)
     run_il2cppdumper(apk_dir, tools.ensure("il2cppdumper", c.work_dir), c.work_dir / "export" / "app-il2cpp")
-    assetripper.export(apk_dir, c.work_dir / "export" / "app", APP_SETTINGS, exe=assetripper.default_exe(c.work_dir))
+    key = apk_key(c.apk) + json.dumps(APP_SETTINGS, sort_keys=True)
+    assetripper.export(apk_dir, c.work_dir / "export" / "app", APP_SETTINGS, exe=assetripper.default_exe(c.work_dir),
+                       key=key)
     print("phone app extracted")
 
 

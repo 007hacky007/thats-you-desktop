@@ -52,6 +52,14 @@ class AssetRipperTests(unittest.TestCase):
         assetripper.export(self.inp, self.out, {}, exe=FAKE)
         self.assertFalse(self.calls.exists())
 
+    def test_changed_inputs_redo_export(self):
+        assetripper.export(self.inp, self.out, {}, exe=FAKE, key="inputs-v1")
+        self.calls.unlink()
+        assetripper.export(self.inp, self.out, {}, exe=FAKE, key="inputs-v1")
+        self.assertFalse(self.calls.exists())
+        assetripper.export(self.inp, self.out, {}, exe=FAKE, key="inputs-v2")
+        self.assertIn("/Export/UnityProject", self.paths())
+
     def test_process_stopped_on_error(self):
         os.environ["FAKE_AR_FAIL"] = "export"
         procs = []

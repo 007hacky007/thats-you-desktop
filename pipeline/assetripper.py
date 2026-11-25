@@ -88,9 +88,11 @@ def default_exe(work_dir: Path) -> list[str]:
     return [str(d / name)]
 
 
-def export(input_dir: Path, out_dir: Path, settings: dict, exe: list[str]) -> None:
+def export(input_dir: Path, out_dir: Path, settings: dict, exe: list[str], key: str = "") -> None:
+    """key identifies the inputs (e.g. merge digest + settings); a different key redoes the export."""
     out_dir = Path(out_dir)
-    if (out_dir / MARKER).is_file():
+    marker = out_dir / MARKER
+    if marker.is_file() and marker.read_text() == f"ok {key}":
         return
     tmp = out_dir.with_name(out_dir.name + ".tmp")
     for d in (tmp, out_dir):
@@ -117,4 +119,4 @@ def export(input_dir: Path, out_dir: Path, settings: dict, exe: list[str]) -> No
             proc.kill()
             proc.wait()
     tmp.rename(out_dir)
-    (out_dir / MARKER).write_text("ok")
+    (out_dir / MARKER).write_text(f"ok {key}")

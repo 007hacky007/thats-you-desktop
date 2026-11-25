@@ -37,6 +37,15 @@ class ExtractAppTests(unittest.TestCase):
         extract_app.unzip_apk(apk, self.root / "apk")
         self.assertTrue((self.root / "apk/lib/arm64-v8a/libil2cpp.so").is_file())
 
+    def test_changed_apk_unzipped_again(self):
+        apk = self.root / "a.apk"
+        apk.write_bytes(apk_bytes({"one": "1"}))
+        extract_app.unzip_apk(apk, self.root / "apk")
+        apk.write_bytes(apk_bytes({"two": "2", "pad": "x" * 100}))
+        extract_app.unzip_apk(apk, self.root / "apk")
+        self.assertTrue((self.root / "apk/two").is_file())
+        self.assertFalse((self.root / "apk/one").exists())
+
     def test_il2cppdumper_invoked_with_arm64_lib_and_metadata(self):
         apk_dir, tool, out = self.root / "apk", self.root / "tool", self.root / "out"
         tool.mkdir()

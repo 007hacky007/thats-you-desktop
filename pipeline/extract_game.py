@@ -1,6 +1,8 @@
 """Export the merged game dump to a Unity project with AssetRipper."""
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from pathlib import Path
 
@@ -43,7 +45,9 @@ def main() -> None:
     c = config.load()
     media = c.work_dir / "merged" / "Media"
     out = c.work_dir / "export" / "game"
-    assetripper.export(media, out, GAME_SETTINGS, exe=assetripper.default_exe(c.work_dir))
+    merged_manifest = (c.work_dir / "merged" / ".merge-manifest.json").read_text()
+    key = hashlib.sha256((merged_manifest + json.dumps(GAME_SETTINGS, sort_keys=True)).encode()).hexdigest()
+    assetripper.export(media, out, GAME_SETTINGS, exe=assetripper.default_exe(c.work_dir), key=key)
     n = clone_streaming_assets(media, out / "ExportedProject")
     print(f"exported to {out}, {n} StreamingAssets files")
 
