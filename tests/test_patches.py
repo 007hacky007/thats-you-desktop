@@ -61,6 +61,21 @@ class PatchTests(unittest.TestCase):
         self.assertTrue((self.project / "Assets/Scripts/New.cs").is_file())
         self.assertFalse((self.project / "Assets/Scripts/B.cs").exists())
 
+    def test_apply_inside_an_enclosing_git_repo(self):
+        # work/project lives inside the main repo; git apply must not resolve paths against it
+        root = Path(self.tmp.name) / "outer"
+        root.mkdir()
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        inner_pr, inner_pj = root / "work/pristine", root / "work/project"
+        for d in (inner_pr, inner_pj):
+            (d / "Assets").mkdir(parents=True)
+            (d / "Assets/A.cs").write_text("one\n")
+        (inner_pj / "Assets/A.cs").write_text("two\n")
+        patches.make(inner_pj, "010-x", ["Assets/A.cs"], pristine=inner_pr, patch_dir=self.pdir)
+        (inner_pj / "Assets/A.cs").write_text("one\n")
+        patches.apply_all(inner_pj, self.pdir)
+        self.assertEqual((inner_pj / "Assets/A.cs").read_text(), "two\n")
+
     def test_failed_patch_raises_with_name(self):
         self.edit_and_make("010-x", "x = 1", "x = 2")
         (self.project / "Assets/Scripts/A.cs").write_text("totally different\n")

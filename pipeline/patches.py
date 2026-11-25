@@ -89,8 +89,11 @@ def apply_all(project: Path, patch_dir: Path = PATCH_DIR) -> list[str]:
         name = p.stem
         if not p.with_suffix(".md").is_file():
             raise PatchError(name, f"missing {p.with_suffix('.md').name} describing the change")
+        # Inside an enclosing repo, git apply resolves paths against that repo's root and silently
+        # skips files outside cwd; the ceiling stops repo discovery so paths stay project-relative.
+        env = dict(os.environ, GIT_CEILING_DIRECTORIES=str(Path(project).resolve().parent))
         r = subprocess.run(["git", "apply", "--whitespace=nowarn", "--unsafe-paths", str(p.resolve())],
-                           cwd=project, capture_output=True, text=True)
+                           cwd=project, capture_output=True, text=True, env=env)
         if r.returncode != 0:
             raise PatchError(name, r.stderr)
         applied.append(name)
