@@ -39,9 +39,11 @@ def private_host(root: Path) -> str:
             v = json.loads((root / "config" / "local.json").read_text()).get("phone_page_url") or ""
         except (OSError, ValueError):
             v = ""
-    if "://" in v:
-        v = urlparse(v).hostname or ""
-    return v.strip().lower()
+    v = v.strip()
+    if not v:
+        return ""
+    # always parse as a URL so "host/path" or "host:443" reduce to the bare host; no host -> "" (refuse)
+    return (urlparse(v if "://" in v else "//" + v).hostname or "").lower()
 
 
 def objects_to_check(lsha: str, rsha: str) -> tuple[list[str], list[str]]:

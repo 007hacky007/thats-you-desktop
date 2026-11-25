@@ -113,6 +113,17 @@ class PrePushTests(unittest.TestCase):
         git(self.repo, "commit", "-qm", "merge")
         self.assertNotEqual(self.push().returncode, 0)
 
+    def test_schemeless_url_with_path_or_port_normalized(self):
+        self.commit("docs/n.md", "only the bare host: secret-page.example.dev\n")
+        for value in ("secret-page.example.dev/some/path", "Secret-Page.example.dev:443", "https://secret-page.example.dev/"):
+            git(self.repo, "config", "iwyk.privateUrl", value)
+            self.assertNotEqual(self.push().returncode, 0, value)
+
+    def test_unparsable_private_url_refuses(self):
+        git(self.repo, "config", "iwyk.privateUrl", "https://")
+        r = self.push()
+        self.assertNotEqual(r.returncode, 0)
+
     def test_unset_private_url_refuses(self):
         git(self.repo, "config", "--unset", "iwyk.privateUrl")
         r = self.push()
