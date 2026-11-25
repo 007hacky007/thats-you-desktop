@@ -1,0 +1,9 @@
+work/
+config/local.json
+*.apk
+spike/webrtc-direct/photos/
+spike/webrtc-direct/spike
+__pycache__/
+.superpowers/
+.DS_Store
+.wrangler/
