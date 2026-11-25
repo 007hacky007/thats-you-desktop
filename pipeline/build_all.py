@@ -62,7 +62,8 @@ def main() -> None:
         raise SystemExit("set unity_editor in config/local.json to run the Unity import")
     log = w / "reports" / "unity-import.log"
     log.parent.mkdir(parents=True, exist_ok=True)
-    rc = unity.run_batch(c.unity_editor, project, [], log)
+    # -accept-apiupdate: let Unity's script updater rewrite obsolete APIs during the 5.3 -> 6 upgrade
+    rc = unity.run_batch(c.unity_editor, project, ["-accept-apiupdate"], log)
     report = compile_report.parse(log)
     compile_report.write(report, w / "reports")
     print(f"unity exit {rc}; {report.total} compile errors; report: {w / 'reports' / 'compile.md'}")

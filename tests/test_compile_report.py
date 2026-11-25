@@ -57,6 +57,19 @@ class CompileReportTests(unittest.TestCase):
         self.assertEqual(r.total, 0)
         self.assertIn("No compile errors", r.markdown())
 
+    def test_partial_compile_flagged(self):
+        # firstpass failed: Unity never compiled the later assemblies, so counts are a lower bound
+        self.log.write_text(
+            "Assets/Plugins/Assembly-CSharp-firstpass/ForcedReset.cs(3,3): error CS0619: 'GUITexture' is obsolete\n"
+            "Scripts have compiler errors.\n")
+        r = compile_report.parse(self.log)
+        self.assertTrue(r.partial)
+        self.assertIn("lower bound", r.markdown())
+
+    def test_full_compile_not_partial(self):
+        self.log.write_text(LOG + "Scripts have compiler errors.\n")
+        self.assertFalse(compile_report.parse(self.log).partial)
+
 
 class UnityRunTests(unittest.TestCase):
     def test_run_batch_argv(self):

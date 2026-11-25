@@ -31,38 +31,49 @@ class PatchError(Exception):
         self.stderr = stderr
 
 
-def _files(root: Path) -> set[str]:
+def _files_under(root: Path, rel: str) -> set[str]:
+    base = root / rel
+    if base.is_file():
+        return {rel}
     out = set()
-    for dirpath, _d, files in os.walk(root):
-        for f in files:
-            if f == ".export-complete":
-                continue
-            out.add((Path(dirpath) / f).relative_to(root).as_posix())
+    if base.is_dir():
+        for dirpath, _d, files in os.walk(base):
+            for f in files:
+                out.add((Path(dirpath) / f).relative_to(root).as_posix())
     return out
 
 
 def _diff_one(pristine: Path, project: Path, rel: str) -> str:
-    a = pristine / rel
-    b = project / rel
+    a, b = pristine / rel, project / rel
     args = ["git", "diff", "--no-index", "--binary", "--no-color",
             str(a) if a.exists() else os.devnull, str(b) if b.exists() else os.devnull]
     r = subprocess.run(args, capture_output=True, text=True)
     if r.returncode not in (0, 1):
         raise PatchError(rel, r.stderr)
     text = r.stdout
-    for side, path in (("a", a), ("b", b)):
-        text = text.replace(f"{side}/{path.as_posix().lstrip('/')}", f"{side}/{rel}")
-        text = text.replace(f"{side}{path.as_posix()}", f"{side}/{rel}")
+    # git prints absolute paths as "a/<abs>" / "b/<abs>"; either side may name either tree
+    for path in (a, b):
+        text = text.replace("/" + path.as_posix().lstrip("/"), "/" + rel)
     return text
 
 
-def make(project: Path, name: str, pristine: Path | None = None, patch_dir: Path = PATCH_DIR) -> Path:
-    project = Path(project)
-    pristine = Path(pristine) if pristine else project.with_name(project.name + "-pristine")
-    pa, pb = _files(pristine), _files(project)
-    changed = sorted((pa ^ pb) | {r for r in pa & pb if not filecmp.cmp(pristine / r, project / r, shallow=False)})
+def make(project: Path, name: str, paths: list[str], pristine: Path | None = None,
+         patch_dir: Path = PATCH_DIR) -> Path:
+    """Write <name>.patch capturing only the named files or directories (relative to the project).
+
+    Unity rewrites many files when it imports the project, so diffing everything would capture
+    Unity's own changes; name exactly the files you changed, added or deleted."""
+    project = Path(project).resolve()
+    pristine = (Path(pristine) if pristine else project.with_name(project.name + "-pristine")).resolve()
+    rels = set()
+    for rel in paths:
+        rel = Path(rel).as_posix()
+        rels |= _files_under(pristine, rel) | _files_under(project, rel)
+    changed = sorted(r for r in rels
+                     if not ((pristine / r).is_file() and (project / r).is_file()
+                             and filecmp.cmp(pristine / r, project / r, shallow=True)))
     if not changed:
-        raise PatchError(name, "no changes against pristine export")
+        raise PatchError(name, "no changes against pristine export in the named paths")
     out = Path(patch_dir) / f"{name}.patch"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("".join(_diff_one(pristine, project, r) for r in changed))

@@ -22,9 +22,18 @@ class Group:
     examples: list[str] = field(default_factory=list)
 
 
+FIRSTPASS = "Assembly-CSharp-firstpass"
+
+
 @dataclass
 class Report:
     groups: dict[tuple[str, str, str], Group]
+
+    @property
+    def partial(self) -> bool:
+        """Unity compiles firstpass (Plugins) before everything else. If only firstpass failed,
+        the main game assemblies were never compiled and their errors are not in the log."""
+        return bool(self.groups) and all(g.assembly == FIRSTPASS for g in self.groups.values())
 
     @property
     def total(self) -> int:
@@ -39,7 +48,11 @@ class Report:
     def markdown(self, top: int = 40) -> str:
         if not self.total:
             return "# Compile report\n\nNo compile errors.\n"
-        lines = ["# Compile report", "", f"Total errors: {self.total} in {len(self.groups)} groups", "",
+        lines = ["# Compile report", ""]
+        if self.partial:
+            lines += ["**Partial:** only Assembly-CSharp-firstpass compiled and it failed, so the main game "
+                      "assemblies were not compiled. These counts are a lower bound.", ""]
+        lines += [f"Total errors: {self.total} in {len(self.groups)} groups", "",
                  "| Category | Errors |", "|---|---|"]
         lines += [f"| {k} | {v} |" for k, v in self.by_category().most_common()]
         lines += ["", f"## Top {top} groups", "", "| Count | Code | Category | File | Example |", "|---|---|---|---|---|"]
@@ -49,13 +62,15 @@ class Report:
         return "\n".join(lines) + "\n"
 
     def to_json(self) -> str:
-        return json.dumps({"total": self.total, "by_category": dict(self.by_category()),
+        return json.dumps({"total": self.total, "partial": self.partial, "by_category": dict(self.by_category()),
                            "groups": [g.__dict__ for g in sorted(self.groups.values(), key=lambda g: -g.count)]},
                           indent=1)
 
 
 def _assembly(path: str) -> str:
     parts = path.replace("\\", "/").split("/")
+    if len(parts) > 2 and parts[1] in ("Plugins", "Standard Assets", "Pro Standard Assets"):
+        return FIRSTPASS
     if "Scripts" in parts and parts.index("Scripts") + 1 < len(parts):
         return parts[parts.index("Scripts") + 1]
     return parts[1] if len(parts) > 2 else "Assembly-CSharp"
