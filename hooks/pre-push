@@ -1,35 +1,107 @@
 #!/usr/bin/env python3
-"""Refuse pushes that could publish decompiled code or the private page URL."""
+"""Refuse pushes that could publish decompiled code or the private phone page address.
+
+Fails closed: any git error, an unknown remote state or a missing private address blocks the push.
+- local-patches/*.patch files on disk mean Plan 7 (convert patches to compiled-assembly edits) is
+  not done. Override only after Plan 7 with IWYK_ALLOW_LOCAL_PATCHES=1.
+- No pushed commit may touch a path under any local-patches/ directory.
+- No object in the pushed commits (text or binary, any letter case, merges included) may contain
+  the private page host from `git config iwyk.privateUrl` (fallback: config/local.json phone_page_url).
+"""
+import json
+import os
 import subprocess
 import sys
+from pathlib import Path
+from urllib.parse import urlparse
 
 ZERO = "0" * 40
 
 
-def git(*args):
-    return subprocess.run(["git", *args], capture_output=True, text=True).stdout
+class GitError(Exception):
+    pass
 
 
-def main():
-    private = git("config", "--get", "iwyk.privateUrl").strip()
-    problems = []
-    for line in sys.stdin:
-        parts = line.split()
-        if len(parts) != 4:
-            continue
-        _lref, lsha, _rref, rsha = parts
-        if lsha == ZERO:
-            continue
-        rng = [lsha] if rsha == ZERO else [f"{rsha}..{lsha}"]
-        touched = git("log", "--name-only", "--pretty=format:", *rng, "--", "local-patches").split()
-        if touched:
-            problems.append("commits touch local-patches/ (decompiled game code). Convert them first (Plan 7) "
-                            "and publish a history that never contained them.")
-        if private and private in git("log", "-p", *rng):
-            problems.append("the private page address (git config iwyk.privateUrl) appears in the pushed history.")
+def git(*args, input=None) -> bytes:
+    r = subprocess.run(["git", *args], capture_output=True, input=input)
+    if r.returncode != 0:
+        raise GitError(f"git {' '.join(args)}: {r.stderr.decode(errors='replace').strip()}")
+    return r.stdout
+
+
+def private_host(root: Path) -> str:
+    try:
+        v = git("config", "--get", "iwyk.privateUrl").decode().strip()
+    except GitError:
+        v = ""
+    if not v:
+        try:
+            v = json.loads((root / "config" / "local.json").read_text()).get("phone_page_url") or ""
+        except (OSError, ValueError):
+            v = ""
+    if "://" in v:
+        v = urlparse(v).hostname or ""
+    return v.strip().lower()
+
+
+def objects_to_check(lsha: str, rsha: str) -> tuple[list[str], list[str]]:
+    """Commits and objects new to this remote branch. When the remote branch is new or its sha is
+    unknown locally, everything reachable from lsha is checked (other remotes may be private)."""
+    known = rsha != ZERO and subprocess.run(["git", "cat-file", "-e", f"{rsha}^{{commit}}"],
+                                            capture_output=True).returncode == 0
+    excl = ["--not", rsha] if known else []
+    commits = git("rev-list", lsha, *excl).decode().split()
+    objs = git("rev-list", "--objects", lsha, *excl).decode().splitlines()
+    return commits, objs
+
+
+def check_ref(lsha: str, rsha: str, host: bytes, problems: list[str]) -> None:
+    commits, objs = objects_to_check(lsha, rsha)
+    if not commits:
+        return
+    paths = {}
+    for line in objs:
+        parts = line.split(" ", 1)
+        if len(parts) == 2:
+            paths[parts[0]] = parts[1]
+    if any("local-patches" in Path(p).parts for p in paths.values()):
+        problems.append("pushed commits touch local-patches/ (decompiled game code). Convert them first "
+                        "(Plan 7) and publish a history that never contained them.")
+    oids = [line.split(" ", 1)[0] for line in objs]
+    types = git("cat-file", "--batch-check=%(objectname) %(objecttype)", input="\n".join(oids).encode() + b"\n")
+    blobs = [l.split()[0] for l in types.decode().splitlines() if l.endswith(" blob")]
+    commit_msgs = git("log", "--format=%B", *commits, "--no-walk").lower()
+    if host in commit_msgs:
+        problems.append("the private page address appears in a pushed commit message.")
+        return
+    for oid in blobs:
+        if host in git("cat-file", "blob", oid).lower():
+            problems.append(f"the private page address (git config iwyk.privateUrl) appears in {paths.get(oid, oid)}.")
+            return
+
+
+def main() -> int:
+    try:
+        root = Path(git("rev-parse", "--show-toplevel").decode().strip())
+        problems = []
+        if list((root / "local-patches").glob("*.patch")) and os.environ.get("IWYK_ALLOW_LOCAL_PATCHES") != "1":
+            problems.append("local-patches/*.patch exist: Plan 7 (convert them to compiled-assembly edits) is not "
+                            "done. Pushing is blocked until then.")
+        host = private_host(root)
+        if not host:
+            problems.append("no private page address configured: set it with git config iwyk.privateUrl <host>.")
+        for line in sys.stdin:
+            parts = line.split()
+            if len(parts) != 4 or parts[1] == ZERO:
+                continue
+            if host:
+                check_ref(parts[1], parts[3], host.encode(), problems)
+    except GitError as e:
+        problems = [f"git failed, refusing to push: {e}"]
     if problems:
-        sys.stderr.write("pre-push blocked:\n" + "".join(f"- {p}\n" for p in problems))
-        sys.exit(1)
+        sys.stderr.write("pre-push blocked:\n" + "".join(f"- {p}\n" for p in dict.fromkeys(problems)))
+        return 1
+    return 0
 
 
-main()
+sys.exit(main())

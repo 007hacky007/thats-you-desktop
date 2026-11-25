@@ -33,8 +33,12 @@ class PrePushTests(unittest.TestCase):
         git(self.repo, "add", *(["-f"] if force else []), rel)
         git(self.repo, "commit", "-qm", f"add {rel}")
 
-    def push(self):
-        return git(self.repo, "push", "-q", "origin", "master", check=False)
+    def push(self, *extra, env=None):
+        import os
+        e = dict(os.environ, **(env or {}))
+        e.pop("IWYK_ALLOW_LOCAL_PATCHES", None) if not env or "IWYK_ALLOW_LOCAL_PATCHES" not in env else None
+        return subprocess.run(["git", "push", "-q", *extra, "origin", "master"], cwd=self.repo,
+                              capture_output=True, text=True, env=e)
 
     def test_prepush_allows_clean_repo(self):
         r = self.push()
@@ -57,6 +61,63 @@ class PrePushTests(unittest.TestCase):
         r = self.push()
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("privateUrl", r.stderr)
+
+    def test_blocks_while_local_patch_files_exist(self):
+        # untracked patch files on disk mean Plan 7 is not done yet
+        (self.repo / "local-patches").mkdir()
+        (self.repo / "local-patches/001-x.patch").write_text("diff\n")
+        r = self.push()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("Plan 7", r.stderr)
+
+    def test_override_allows_push_with_local_patch_files(self):
+        (self.repo / "local-patches").mkdir()
+        (self.repo / "local-patches/001-x.patch").write_text("diff\n")
+        self.assertEqual(self.push(env={"IWYK_ALLOW_LOCAL_PATCHES": "1"}).returncode, 0)
+
+    def test_unknown_remote_sha_fails_closed(self):
+        # remote moved on elsewhere: rsha is not a local object; force push must still be checked
+        self.assertEqual(self.push().returncode, 0)
+        other = Path(self.tmp.name) / "other"
+        git(Path(self.tmp.name), "clone", "-q", str(self.remote), str(other))
+        for k, v in [("user.name", "t"), ("user.email", "t@example.invalid"), ("commit.gpgsign", "false")]:
+            git(other, "config", k, v)
+        (other / "x.txt").write_text("x\n")
+        git(other, "add", "x.txt")
+        git(other, "commit", "-qm", "x")
+        git(other, "push", "-q", "origin", "master")
+        self.commit("docs/x.md", "see https://secret-page.example.dev/\n")
+        r = self.push("--force")
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_blocks_url_in_binary_file(self):
+        p = self.repo / "Library/blob.asset"
+        p.parent.mkdir(parents=True)
+        p.write_bytes(b"\x00\x01binary\x00secret-page.example.dev\x00")
+        git(self.repo, "add", "Library/blob.asset")
+        git(self.repo, "commit", "-qm", "bin")
+        self.assertNotEqual(self.push().returncode, 0)
+
+    def test_blocks_url_in_other_case(self):
+        self.commit("docs/x.md", "SECRET-PAGE.Example.dev\n")
+        self.assertNotEqual(self.push().returncode, 0)
+
+    def test_blocks_url_added_in_merge_resolution(self):
+        git(self.repo, "checkout", "-q", "-b", "side")
+        self.commit("a.txt", "side\n")
+        git(self.repo, "checkout", "-q", "master")
+        self.commit("b.txt", "main\n")
+        git(self.repo, "merge", "-q", "--no-commit", "side", check=False)
+        (self.repo / "c.txt").write_text("secret-page.example.dev\n")
+        git(self.repo, "add", "c.txt")
+        git(self.repo, "commit", "-qm", "merge")
+        self.assertNotEqual(self.push().returncode, 0)
+
+    def test_unset_private_url_refuses(self):
+        git(self.repo, "config", "--unset", "iwyk.privateUrl")
+        r = self.push()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("iwyk.privateUrl", r.stderr)
 
 
 if __name__ == "__main__":

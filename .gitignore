@@ -8,3 +8,12 @@ __pycache__/
 .DS_Store
 .wrangler/
 local-patches/
+# a Unity project must never be opened at the repo root
+/Assets/
+/Library/
+/Logs/
+/Temp/
+/UserSettings/
+/ProjectSettings/
+/Packages/
+obj/
