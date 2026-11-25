@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Spike - live camera over WebRTC</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;color:#eee;font-family:system-ui,sans-serif}
+  #wrap{display:flex;flex-direction:column;height:100%}
+  #status{padding:8px 12px;font-size:13px;background:#222;white-space:pre-wrap}
+  #stage{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  canvas{max-width:100%;max-height:100%}
+  #bar{display:flex;gap:6px;padding:10px;flex-wrap:wrap;justify-content:center;background:#222}
+  button{font-size:16px;padding:10px 14px;border-radius:10px;border:0;background:#444;color:#fff}
+  button.on{background:#2a7}
+  #snap{background:#c33;font-weight:bold}
+  #start{font-size:22px;padding:18px 28px;background:#2a7}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="status">loading...</div>
+  <div id="stage"><button id="start">Start camera + connect</button><canvas id="cv" hidden></canvas></div>
+  <div id="bar" hidden>
+    <button data-fx="0" class="on">None</button>
+    <button data-fx="1">Twist</button>
+    <button data-fx="2">Bulge</button>
+    <button data-fx="3">Kaleido</button>
+    <button data-fx="4">Mirror</button>
+    <button id="snap">Snap + send</button>
+  </div>
+</div>
+<video id="vid" playsinline muted autoplay hidden></video>
+<script>
+const $ = s => document.querySelector(s);
+const lines = [];
+function log(m){ lines.push(m); if(lines.length>8) lines.shift(); $('#status').textContent = lines.join('\n'); console.log(m); }
+
+const q = new URLSearchParams(location.hash.slice(1));
+const cfg = {h:q.get('h'), p:q.get('p'), u:q.get('u'), w:q.get('w'), f:q.get('f'), t:q.get('t')};
+log(cfg.h ? `game at ${cfg.h}:${cfg.p}` : 'no game info in URL - scan the QR code on the screen');
+log('secure context: ' + window.isSecureContext);
+
+function fpHex(b64){
+  const s = atob(b64.replace(/-/g,'+').replace(/_/g,'/'));
+  return [...s].map(c=>c.charCodeAt(0).toString(16).padStart(2,'0').toUpperCase()).join(':');
+}
+
+let dc = null;
+async function connect(){
+  const pc = new RTCPeerConnection({iceServers: []});
+  dc = pc.createDataChannel('game', {negotiated:true, id:0});
+  dc.binaryType = 'arraybuffer';
+  dc.onopen = () => { log('data channel OPEN'); dc.send(JSON.stringify({type:'hello', token:cfg.t, ua:navigator.userAgent.slice(0,80)})); };
+  dc.onclose = () => log('data channel closed');
+  dc.onmessage = e => { if(typeof e.data==='string') log('game: '+e.data); };
+  pc.onconnectionstatechange = () => log('connection: ' + pc.connectionState);
+  pc.oniceconnectionstatechange = () => log('ice: ' + pc.iceConnectionState);
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  const ans = [
+    'v=0','o=- 0 0 IN IP4 '+cfg.h,'s=-','t=0 0','a=ice-lite','a=group:BUNDLE 0',
+    `m=application ${cfg.p} UDP/DTLS/SCTP webrtc-datachannel`,'c=IN IP4 '+cfg.h,'a=mid:0',
+    'a=ice-ufrag:'+cfg.u,'a=ice-pwd:'+cfg.w,'a=fingerprint:sha-256 '+fpHex(cfg.f),
+    'a=setup:passive','a=sctp-port:5000','a=max-message-size:262144',
+    `a=candidate:1 1 udp 2130706431 ${cfg.h} ${cfg.p} typ host`,'a=end-of-candidates',''
+  ].join('\r\n');
+  await pc.setRemoteDescription({type:'answer', sdp:ans});
+  log('connecting...');
+}
+
+// ---------- live camera with WebGL effects ----------
+const VS = `attribute vec2 p; varying vec2 uv; void main(){ uv = p*0.5+0.5; gl_Position = vec4(p,0.,1.); }`;
+const FS = `precision mediump float; varying vec2 uv; uniform sampler2D t; uniform int fx; uniform float time;
+void main(){
+  vec2 c = vec2(1.0-uv.x, 1.0-uv.y); // mirror (selfie) + flip y
+  vec2 d = c-0.5; float r = length(d); float a = atan(d.y,d.x);
+  if(fx==1){ float k = max(0.0,0.5-r)*6.0*sin(time*0.7); a += k; c = 0.5+r*vec2(cos(a),sin(a)); }
+  else if(fx==2){ if(r<0.45){ float nr = pow(r/0.45,1.8)*0.45; c = 0.5+nr*vec2(cos(a),sin(a)); } }
+  else if(fx==3){ float seg = 6.2831853/6.0; a = mod(a,seg); a = abs(a-seg*0.5); c = 0.5+r*vec2(cos(a),sin(a)); }
+  else if(fx==4){ if(c.x>0.5) c.x = 1.0-c.x; }
+  gl_FragColor = texture2D(t, clamp(c,0.0,1.0));
+}`;
+let fx = 0;
+async function startCamera(){
+  const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user', width:{ideal:1280}, height:{ideal:720}}, audio:false});
+  const v = $('#vid'); v.srcObject = stream; await v.play();
+  const cv = $('#cv'); cv.width = v.videoWidth; cv.height = v.videoHeight; cv.hidden = false;
+  log(`camera ${v.videoWidth}x${v.videoHeight}`);
+  const gl = cv.getContext('webgl', {preserveDrawingBuffer:true});
+  const sh = (type,src)=>{ const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s); if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) log(gl.getShaderInfoLog(s)); return s; };
+  const pr = gl.createProgram(); gl.attachShader(pr, sh(gl.VERTEX_SHADER,VS)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER,FS)); gl.linkProgram(pr); gl.useProgram(pr);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(pr,'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+  const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+  for (const [k,val] of [[gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE],[gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE],[gl.TEXTURE_MIN_FILTER,gl.LINEAR],[gl.TEXTURE_MAG_FILTER,gl.LINEAR]]) gl.texParameteri(gl.TEXTURE_2D,k,val);
+  const uFx = gl.getUniformLocation(pr,'fx'), uT = gl.getUniformLocation(pr,'time');
+  let frames = 0, t0 = performance.now();
+  (function draw(now){
+    gl.viewport(0,0,cv.width,cv.height);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,v);
+    gl.uniform1i(uFx, fx); gl.uniform1f(uT, now/1000);
+    gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+    if(++frames===120){ log(`preview ${(120000/(now-t0)).toFixed(0)} fps`); }
+    requestAnimationFrame(draw);
+  })(performance.now());
+}
+
+async function snap(){
+  if(!dc || dc.readyState!=='open'){ log('not connected'); return; }
+  const blob = await new Promise(r => $('#cv').toBlob(r, 'image/jpeg', 0.85));
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  dc.send(JSON.stringify({type:'photo', size:buf.length}));
+  const CH = 16384;
+  for(let o=0;o<buf.length;o+=CH){
+    while(dc.bufferedAmount > 1<<20) await new Promise(r=>setTimeout(r,20));
+    dc.send(buf.subarray(o, o+CH));
+  }
+  log(`sent photo ${buf.length} bytes`);
+}
+
+$('#start').onclick = async () => {
+  $('#start').remove(); $('#bar').hidden = false;
+  try { await startCamera(); } catch(e){ log('camera error: '+e.name+' '+e.message); }
+  if(cfg.h) { try { await connect(); } catch(e){ log('connect error: '+e); } }
+};
+document.querySelectorAll('[data-fx]').forEach(b => b.onclick = () => {
+  fx = +b.dataset.fx; document.querySelectorAll('[data-fx]').forEach(x=>x.classList.toggle('on', x===b));
+});
+$('#snap').onclick = snap;
+</script>
+</body>
+</html>
