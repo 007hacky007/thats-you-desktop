@@ -47,9 +47,12 @@ def compiler_options(rsp_text: str, out_dir: Path) -> list[str]:
 
 def sources(project: Path, extra_dirs: list[Path]) -> list[str]:
     out = []
-    for root in [Path(project) / "Assets", *extra_dirs]:
+    assets = Path(project) / "Assets"
+    for root in [assets, *extra_dirs]:
         for dirpath, dirs, files in os.walk(root):
             dirs[:] = [d for d in dirs if d != "Editor"]
+            if root == assets and Path(dirpath) == assets and extra_dirs:
+                dirs[:] = [d for d in dirs if d != "Port"]  # synced copy of unity/Port; compile the repo copy
             out += [str(Path(dirpath) / f) for f in files if f.endswith(".cs")]
     return sorted(out)
 

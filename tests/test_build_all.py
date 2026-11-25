@@ -46,6 +46,22 @@ class PrepareProjectTests(unittest.TestCase):
         self.assertTrue(build_all.prepare_project(self.pristine, self.project, self.pdir))
         self.assertEqual((self.project / "Assets/A.cs").read_text(), "class A2 {}\n")
 
+    def test_port_code_synced_into_assets_port(self):
+        port = Path(self.tmp.name) / "port"
+        (port / "Stubs").mkdir(parents=True)
+        (port / "Stubs/S.cs").write_text("class S {}\n")
+        build_all.prepare_project(self.pristine, self.project, self.pdir, port_dir=port)
+        self.assertEqual((self.project / "Assets/Port/Stubs/S.cs").read_text(), "class S {}\n")
+        # edits and deletions in the repo show up on the next run, even without patch changes
+        (port / "Stubs/S.cs").write_text("class S2 {}\n")
+        (port / "New.cs").write_text("class N {}\n")
+        build_all.prepare_project(self.pristine, self.project, self.pdir, port_dir=port)
+        self.assertEqual((self.project / "Assets/Port/Stubs/S.cs").read_text(), "class S2 {}\n")
+        self.assertTrue((self.project / "Assets/Port/New.cs").is_file())
+        (port / "New.cs").unlink()
+        build_all.prepare_project(self.pristine, self.project, self.pdir, port_dir=port)
+        self.assertFalse((self.project / "Assets/Port/New.cs").exists())
+
 
 class UnityEditorCheckTests(unittest.TestCase):
     def test_missing_editor_names_key(self):

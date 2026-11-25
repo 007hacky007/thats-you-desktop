@@ -8,6 +8,7 @@ import shutil
 from pathlib import Path
 
 from pipeline import compile_report, config, extract_app, extract_game, merge, patches, unity
+from pipeline.csc_check import PORT_DIR
 from pipeline.merge import _place_file
 
 PROJECT_MARKER = ".project-state.json"
@@ -27,10 +28,44 @@ def _clone_tree(src: Path, dst: Path) -> None:
             _place_file(s, dst / s.relative_to(src))
 
 
-def prepare_project(pristine: Path, project: Path, patch_dir: Path) -> bool:
-    """(Re)build the working project from the pristine export when patches changed.
+def sync_port(port_dir: Path, project: Path) -> None:
+    """Mirror our own code (unity/Port) into Assets/Port. Unity-generated .meta files are kept for
+    files that still exist so script GUIDs stay stable; stale files are removed."""
+    dst_root = project / "Assets" / "Port"
+    want = set()
+    if Path(port_dir).is_dir():
+        for dirpath, _d, files in os.walk(port_dir):
+            for f in files:
+                if f in (".gitkeep", ".DS_Store"):
+                    continue
+                src = Path(dirpath) / f
+                rel = src.relative_to(port_dir)
+                want.add(rel.as_posix())
+                dst = dst_root / rel
+                if not dst.is_file() or dst.read_bytes() != src.read_bytes():
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(src, dst)
+    if dst_root.is_dir():
+        for dirpath, _d, files in os.walk(dst_root, topdown=False):
+            for f in files:
+                rel = (Path(dirpath) / f).relative_to(dst_root).as_posix()
+                base = rel[:-5] if rel.endswith(".meta") else rel
+                if rel not in want and base not in want and not (dst_root / base).is_dir():
+                    (Path(dirpath) / f).unlink()
+            if Path(dirpath) != dst_root and not any(Path(dirpath).iterdir()):
+                Path(dirpath).rmdir()
 
-    Returns True when the project was rebuilt. Unity's Library cache is kept."""
+
+def prepare_project(pristine: Path, project: Path, patch_dir: Path, port_dir: Path | None = None) -> bool:
+    """(Re)build the working project from the pristine export when patches changed, then sync
+    unity/Port into Assets/Port. Returns True when the project was rebuilt. Unity's Library cache is kept."""
+    port_dir = PORT_DIR if port_dir is None else port_dir
+    rebuilt = _rebuild_if_needed(pristine, project, patch_dir)
+    sync_port(port_dir, project)
+    return rebuilt
+
+
+def _rebuild_if_needed(pristine: Path, project: Path, patch_dir: Path) -> bool:
     pristine_marker = pristine / ".export-complete"
     digest = _patch_digest(patch_dir) + ":" + (pristine_marker.read_text() if pristine_marker.is_file() else "")
     state = project / PROJECT_MARKER

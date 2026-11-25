@@ -48,6 +48,13 @@ class CscCheckTests(unittest.TestCase):
         names = sorted(Path(s).name for s in srcs)
         self.assertEqual(names, ["A.cs", "B.cs", "C (1).cs", "Stub.cs"])
 
+    def test_synced_assets_port_not_compiled_twice(self):
+        (self.p / "Assets/Port/Ps4").mkdir(parents=True)
+        (self.p / "Assets/Port/Ps4/Stub.cs").write_text("//")
+        srcs = csc_check.sources(self.p, [self.extra])
+        self.assertEqual(sum(1 for s in srcs if s.endswith("Stub.cs")), 1)
+        self.assertTrue(any(s.startswith(str(self.extra)) for s in srcs if s.endswith("Stub.cs")))
+
     def test_parse_errors_relative_paths(self):
         out = ('/abs/proj/Assets/Scripts/C (1).cs(3,4): error CS0103: The name x does not exist\n'
                'Assets/Plugins/F/B.cs(1,2): warning CS0618: obsolete\n'
