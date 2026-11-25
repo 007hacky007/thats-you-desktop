@@ -57,6 +57,23 @@ class CompileReportTests(unittest.TestCase):
         self.assertEqual(r.total, 0)
         self.assertIn("No compile errors", r.markdown())
 
+    def test_unity_failure_without_errors_not_reported_clean(self):
+        self.log.write_text("License error: no valid licence\n")
+        r = compile_report.parse(self.log, exit_code=1)
+        self.assertTrue(r.failed)
+        self.assertNotIn("No compile errors", r.markdown())
+        self.assertIn("Unity exited with code 1", r.markdown())
+
+    def test_missing_log_is_failure(self):
+        r = compile_report.parse(self.log.with_name("missing.log"), exit_code=1)
+        self.assertTrue(r.failed)
+
+    def test_paths_with_parentheses(self):
+        self.log.write_text("Assets/Scripts/Assembly-CSharp/Foo (1).cs(3,4): error CS0103: x\n")
+        r = compile_report.parse(self.log)
+        self.assertEqual(r.total, 1)
+        self.assertIn(("CS0103", "Assembly-CSharp", "Assets/Scripts/Assembly-CSharp/Foo (1).cs"), r.groups)
+
     def test_partial_compile_flagged(self):
         # firstpass failed: Unity never compiled the later assemblies, so counts are a lower bound
         self.log.write_text(

@@ -42,25 +42,38 @@ def unzip_apk(apk: Path, dest: Path) -> None:
     marker.write_text("ok")
 
 
+DUMP_OUTPUTS = ("dump.cs", "script.json", "il2cpp.h", "DummyDll")
+DUMP_MARKER = ".dump-complete"
+
+
 def run_il2cppdumper(apk_dir: Path, tool_dir: Path, out: Path) -> None:
     dotnet = shutil.which("dotnet")
     if not dotnet:
         raise RuntimeError("Il2CppDumper needs the .NET runtime: install it so that 'dotnet' is on PATH")
     out = Path(out)
-    if (out / "dump.cs").is_file():
+    if (out / DUMP_MARKER).is_file():
         return
-    out.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_name(out.name + ".tmp")
+    for d in (tmp, out):
+        if d.exists():
+            shutil.rmtree(d)
+    tmp.mkdir(parents=True)
     cfg_path = Path(tool_dir) / "config.json"
     if cfg_path.is_file():  # its "press any key" prompt crashes without a console
         cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
         cfg["RequireAnyKey"] = False
         cfg_path.write_text(json.dumps(cfg, indent=2))
-    env =dict(os.environ, DOTNET_ROLL_FORWARD="Major")  # tool targets net7, newer runtimes are fine
+    env = dict(os.environ, DOTNET_ROLL_FORWARD="Major")  # tool targets net7, newer runtimes are fine
     r = subprocess.run([dotnet, str(Path(tool_dir) / "Il2CppDumper.dll"), str(Path(apk_dir) / LIB),
-                        str(Path(apk_dir) / METADATA), str(out)],
+                        str(Path(apk_dir) / METADATA), str(tmp)],
                        input="\n", capture_output=True, text=True, env=env)
-    if r.returncode != 0 or not (out / "dump.cs").is_file():
-        raise RuntimeError(f"Il2CppDumper failed ({r.returncode}): {r.stdout[-2000:]}{r.stderr[-2000:]}")
+    missing = [f for f in DUMP_OUTPUTS if not (tmp / f).exists()]
+    if r.returncode != 0 or missing:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise RuntimeError(f"Il2CppDumper failed ({r.returncode}, missing {missing}): "
+                           f"{r.stdout[-2000:]}{r.stderr[-2000:]}")
+    tmp.rename(out)
+    (out / DUMP_MARKER).write_text("ok")
 
 
 def main() -> None:

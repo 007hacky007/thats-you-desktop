@@ -7,7 +7,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-ERR = re.compile(r"^(?P<file>[^\r\n()]+\.cs)\((?P<line>\d+),(?P<col>\d+)\): error (?P<code>CS\d+): (?P<msg>.*)$")
+ERR = re.compile(r"^(?P<file>.+?\.cs)\((?P<line>\d+),(?P<col>\d+)\): error (?P<code>CS\d+): (?P<msg>.*)$")
 THIRD_PARTY = {"PlayMaker", "AmplifyColor", "AmplifyOcclusion", "ConditionalExpression"}
 PS4_WORDS = re.compile(r"\bPS4\b|'PS4|\bSony\b|'Sony|\bSce[A-Z]|UnityEngine\.PS4")
 
@@ -28,6 +28,13 @@ FIRSTPASS = "Assembly-CSharp-firstpass"
 @dataclass
 class Report:
     groups: dict[tuple[str, str, str], Group]
+    exit_code: int | None = None
+    log_missing: bool = False
+
+    @property
+    def failed(self) -> bool:
+        """Unity failed for a reason other than compile errors (licence, crash, missing log)."""
+        return self.log_missing or (self.exit_code not in (None, 0) and not self.groups)
 
     @property
     def partial(self) -> bool:
@@ -46,6 +53,10 @@ class Report:
         return c
 
     def markdown(self, top: int = 40) -> str:
+        if self.failed:
+            why = "the log file was not written" if self.log_missing else "no compile errors were found in the log"
+            return (f"# Compile report\n\n**Unity failed:** Unity exited with code {self.exit_code} and {why}. "
+                    "Check the Unity log (licence, crash, version mismatch).\n")
         if not self.total:
             return "# Compile report\n\nNo compile errors.\n"
         lines = ["# Compile report", ""]
@@ -62,7 +73,8 @@ class Report:
         return "\n".join(lines) + "\n"
 
     def to_json(self) -> str:
-        return json.dumps({"total": self.total, "partial": self.partial, "by_category": dict(self.by_category()),
+        return json.dumps({"total": self.total, "partial": self.partial, "failed": self.failed,
+                           "exit_code": self.exit_code, "by_category": dict(self.by_category()),
                            "groups": [g.__dict__ for g in sorted(self.groups.values(), key=lambda g: -g.count)]},
                           indent=1)
 
@@ -88,9 +100,11 @@ def _category(assembly: str, path: str, code: str, msg: str) -> str:
     return "other"
 
 
-def parse(log: Path) -> Report:
+def parse(log: Path, exit_code: int | None = None) -> Report:
     groups: dict[tuple[str, str, str], Group] = {}
     seen = set()
+    if not Path(log).is_file():
+        return Report(groups, exit_code, log_missing=True)
     for raw in Path(log).read_text(errors="replace").splitlines():
         m = ERR.match(raw.strip())
         if not m:
@@ -107,7 +121,7 @@ def parse(log: Path) -> Report:
         g.count += 1
         if len(g.examples) < 3:
             g.examples.append(m["msg"])
-    return Report(groups)
+    return Report(groups, exit_code)
 
 
 def write(report: Report, out_dir: Path) -> None:

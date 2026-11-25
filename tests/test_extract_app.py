@@ -44,7 +44,11 @@ class ExtractAppTests(unittest.TestCase):
         (tool / "config.json").write_text('{"RequireAnyKey": true, "DumpMethod": true}')
 
         def fake_run(argv, **kw):
-            (out / "dump.cs").write_text("")
+            o = Path(argv[4])
+            o.mkdir(parents=True, exist_ok=True)
+            for f in ("dump.cs", "script.json", "il2cpp.h"):
+                (o / f).write_text("")
+            (o / "DummyDll").mkdir()
             return mock.Mock(returncode=0, stdout="", stderr="")
 
         with mock.patch("shutil.which", return_value="/usr/bin/dotnet"), \
@@ -59,6 +63,32 @@ class ExtractAppTests(unittest.TestCase):
         self.assertEqual(argv[2], str(apk_dir / "lib/arm64-v8a/libil2cpp.so"))
         self.assertEqual(argv[3], str(apk_dir / "assets/bin/Data/Managed/Metadata/global-metadata.dat"))
         self.assertEqual(run.call_args.kwargs["env"]["DOTNET_ROLL_FORWARD"], "Major")
+
+    def test_partial_dump_is_redone(self):
+        tool, out = self.root / "tool", self.root / "out"
+        tool.mkdir()
+        calls = []
+
+        def crash_after_dump_cs(argv, **kw):
+            calls.append(argv)
+            o = Path(argv[4])
+            o.mkdir(parents=True, exist_ok=True)
+            (o / "dump.cs").write_text("partial")
+            if len(calls) == 1:
+                return mock.Mock(returncode=134, stdout="", stderr="killed")
+            for f in ("script.json", "il2cpp.h"):
+                (o / f).write_text("x")
+            (o / "DummyDll").mkdir(exist_ok=True)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch("shutil.which", return_value="/usr/bin/dotnet"), \
+             mock.patch("subprocess.run", side_effect=crash_after_dump_cs):
+            with self.assertRaises(RuntimeError):
+                extract_app.run_il2cppdumper(self.root, tool, out)
+            self.assertFalse((out / "dump.cs").exists())
+            extract_app.run_il2cppdumper(self.root, tool, out)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue((out / "script.json").is_file())
 
     def test_missing_dotnet_clear_error(self):
         with mock.patch("shutil.which", return_value=None):

@@ -39,5 +39,29 @@ class PrepareProjectTests(unittest.TestCase):
         self.assertEqual((self.project / "Library/cache").read_text(), "big")
 
 
+class UnityEditorCheckTests(unittest.TestCase):
+    def test_missing_editor_names_key(self):
+        from pipeline.config import ConfigError
+        with self.assertRaises(ConfigError) as cm:
+            build_all.check_unity_editor(None)
+        self.assertEqual(cm.exception.key, "unity_editor")
+
+    def test_app_bundle_instead_of_binary_rejected(self):
+        from pipeline.config import ConfigError
+        with tempfile.TemporaryDirectory() as t:
+            app = Path(t) / "Unity.app"
+            app.mkdir()
+            with self.assertRaises(ConfigError) as cm:
+                build_all.check_unity_editor(app)
+            self.assertIn("Contents/MacOS/Unity", cm.exception.message)
+
+    def test_executable_accepted(self):
+        with tempfile.TemporaryDirectory() as t:
+            exe = Path(t) / "Unity"
+            exe.write_text("#!/bin/sh\n")
+            exe.chmod(0o755)
+            build_all.check_unity_editor(exe)
+
+
 if __name__ == "__main__":
     unittest.main()

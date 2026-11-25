@@ -49,8 +49,20 @@ def prepare_project(pristine: Path, project: Path, patch_dir: Path) -> bool:
     return True
 
 
+def check_unity_editor(editor: Path | None) -> None:
+    """Fail before hours of extraction if the editor path is wrong."""
+    if not editor:
+        raise config.ConfigError("unity_editor", "missing; set it to the Unity editor binary")
+    editor = Path(editor)
+    if editor.suffix == ".app" or (editor / "Contents").is_dir():
+        raise config.ConfigError("unity_editor", f"{editor} is the app bundle; use {editor}/Contents/MacOS/Unity")
+    if not editor.is_file() or not os.access(editor, os.X_OK):
+        raise config.ConfigError("unity_editor", f"not an executable file: {editor}")
+
+
 def main() -> None:
     c = config.load()
+    check_unity_editor(c.unity_editor)
     w = c.work_dir
     print("merge:", merge.merge(c.base_dump, c.patch_dump, w / "merged"))
     extract_game.main()
@@ -58,15 +70,15 @@ def main() -> None:
     pristine = w / "export" / "game" / "ExportedProject"
     project = w / "project"
     print("project rebuilt:", prepare_project(pristine, project, patches.PATCH_DIR))
-    if not c.unity_editor:
-        raise SystemExit("set unity_editor in config/local.json to run the Unity import")
     log = w / "reports" / "unity-import.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     # -accept-apiupdate: let Unity's script updater rewrite obsolete APIs during the 5.3 -> 6 upgrade
     rc = unity.run_batch(c.unity_editor, project, ["-accept-apiupdate"], log)
-    report = compile_report.parse(log)
+    report = compile_report.parse(log, exit_code=rc)
     compile_report.write(report, w / "reports")
     print(f"unity exit {rc}; {report.total} compile errors; report: {w / 'reports' / 'compile.md'}")
+    if report.failed:
+        raise SystemExit(f"Unity failed (exit {rc}); see {log}")
 
 
 if __name__ == "__main__":
