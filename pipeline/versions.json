@@ -1,5 +1,8 @@
 {
-  "unity": {"version": "6000.3.29f1", "changeset": "96d2fe17529c"},
+  "unity": {
+    "version": "6000.6.10f1",
+    "changeset": "40e81493c67d"
+  },
   "assetripper": {
     "version": "2.0.0",
     "url_macos-arm64": "https://github.com/AssetRipper/AssetRipper/releases/download/2.0.0/AssetRipper_mac_arm64.tar.xz",

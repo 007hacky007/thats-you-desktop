@@ -1,6 +1,10 @@
 # Unity version
 
-Pinned: **Unity 6000.3.29f1** (Unity 6.3 LTS, changeset 96d2fe17529c, released 2026-11-19).
+Pinned: **Unity 6000.6.10f1** (Unity 6.6 update release, changeset 40e81493c67d, released 2026-11-19).
+
+Update 2026-11-25: the owner's Unity Hub installed 6.6 automatically, so the pin moved from 6.3 LTS (6000.3.29f1) to 6.6. The built-in render pipeline is deprecated from 6.5 (warnings) but supported through the full 6.7 LTS lifecycle. 6.6 loses support once 6.7 ships, so **move the pin to 6.7 LTS when it is released** (a minor upgrade).
+
+Original reasoning for choosing a Unity 6 release over 2022.3 LTS:
 
 Why 6.3 LTS and not 2022.3 LTS:
 
@@ -9,8 +13,8 @@ Why 6.3 LTS and not 2022.3 LTS:
 - Native Windows x64 and macOS arm64 standalone players.
 - Unity Personal lets you turn off the "Made with Unity" splash screen in Unity 6.
 
-Install: Unity Hub, Personal license, editor 6000.3.29f1 with "Windows Build Support (Mono)" and "Mac Build Support (Mono)".
-Hub deep link: `unityhub://6000.3.29f1/96d2fe17529c`
+Install: Unity Hub, Personal license, editor 6000.6.10f1 with "Windows Build Support (Mono)" and "Mac Build Support (Mono)".
+Hub deep link: `unityhub://6000.6.10f1/40e81493c67d`
 
 Sources:
 - https://unity.com/topics/render-pipelines-strategy-for-2026
