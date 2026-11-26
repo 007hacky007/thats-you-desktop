@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createBlobStore, createDownloads, createUploads, defaultUuid, MAX_UPLOAD } from '../../js/net/content.js';
+import {
+  createBlobStore, createDownloads, createUploads, defaultUuid, MAX_UPLOAD, MAX_HEADERS, REQUIRED_SLACK,
+} from '../../js/net/content.js';
 import { createResources } from '../../js/net/resources.js';
 import { createFakeClock } from '../../js/util/clock.js';
 
@@ -223,4 +225,29 @@ test('manifest: a resent manifest re-requests after 5 s; offline sends are retri
   res.reset();
   res.onManifest({ Requirements: [{ GUID: 'z', Rqrmnt: 1 }] });
   assert.equal(sent.length, 3);
+});
+
+test('blob store: required entries cannot grow it past the hard cap', () => {
+  const u = fakeUrls();
+  const s = createBlobStore({ capacity: 3, ...u });
+  const keys = [];
+  for (let i = 0; i < 20; i++) keys.push('k' + i);
+  s.setRequired(keys);
+  for (const k of keys) s.put(k, new Uint8Array(1));
+  assert.equal(s.size, 3 * REQUIRED_SLACK);
+  assert.ok(s.has('k19'));
+  assert.ok(!s.has('k0'));
+});
+
+test('downloads keep at most MAX_HEADERS unpaired headers', () => {
+  const clock = createFakeClock();
+  const got = [];
+  const d = createDownloads({ clock, onImage: (g) => got.push(g), onThumbnail: () => {} });
+  for (let i = 1; i <= MAX_HEADERS + 10; i++) {
+    d.header({ TypeString: 'ImageResourceContentTransferMessage', ImageGUID: 'g' + i, TransferID: i });
+  }
+  assert.equal(d.pending, MAX_HEADERS);
+  d.binary(1, new Uint8Array(1));
+  d.binary(MAX_HEADERS + 10, new Uint8Array(1));
+  assert.deepEqual(got, ['g' + (MAX_HEADERS + 10)]);
 });

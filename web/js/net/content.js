@@ -8,6 +8,12 @@ export const MAX_UPLOAD = 128000;
 export const ORPHAN_KEEP_MS = 10000;
 export const HEADER_KEEP_MS = 60000;
 export const STORE_CAPACITY = 120;
+// Hard caps against a broken game: required entries may push the store past
+// its capacity, but never past REQUIRED_SLACK times it; unpaired download
+// headers are kept at most MAX_HEADERS at a time (oldest dropped first).
+export const REQUIRED_SLACK = 2;
+export const MAX_HEADERS = 64;
+export const MAX_ORPHANS = 8;
 
 function defaultMakeUrl(bytes) {
   const U = globalThis.URL;
@@ -53,6 +59,14 @@ export function createBlobStore({ capacity = STORE_CAPACITY, makeUrl = defaultMa
     for (const key of [...entries.keys()]) {
       if (entries.size <= capacity) break;
       if (required.has(key) || key === keep) continue;
+      remove(key);
+    }
+    const hard = capacity * REQUIRED_SLACK;
+    if (entries.size <= hard) return;
+    log.warn('blob store over ' + hard + ' entries, evicting required images');
+    for (const key of [...entries.keys()]) {
+      if (entries.size <= hard) break;
+      if (key === keep) continue;
       remove(key);
     }
   }
@@ -139,7 +153,16 @@ export function createDownloads({ clock, log = nullLog, onImage, onThumbnail }) 
       return true;
     }
     const old = headers.get(tid);
-    if (old) clock.clearTimeout(old.timer);
+    if (old) {
+      clock.clearTimeout(old.timer);
+      headers.delete(tid);
+    }
+    while (headers.size >= MAX_HEADERS) {
+      const [firstTid, first] = headers.entries().next().value;
+      clock.clearTimeout(first.timer);
+      headers.delete(firstTid);
+      log.warn('content header ' + firstTid + ' dropped: too many waiting headers');
+    }
     const timer = clock.setTimeout(() => {
       headers.delete(tid);
       log.warn('content header ' + tid + ' never got its data');
@@ -158,7 +181,7 @@ export function createDownloads({ clock, log = nullLog, onImage, onThumbnail }) 
     }
     const old = orphans.get(tid);
     if (old) clock.clearTimeout(old.timer);
-    if (orphans.size >= 8 && !old) {
+    if (orphans.size >= MAX_ORPHANS && !old) {
       const [firstTid, first] = orphans.entries().next().value;
       clock.clearTimeout(first.timer);
       orphans.delete(firstTid);
