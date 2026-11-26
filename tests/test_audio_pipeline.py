@@ -314,5 +314,20 @@ class CliTests(unittest.TestCase):
             audio.parse_args(["--verify", "some"])
 
 
+class DefaultStepsTests(unittest.TestCase):
+    def test_default_steps_use_the_real_pipeline_modules(self):
+        from pipeline import audio_convert, audio_graph, audio_install, audio_tools
+
+        s = audio.default_steps()
+        self.assertIs(s.ensure_vgmstream, audio_tools.ensure_vgmstream)
+        self.assertIs(s.ensure_codebooks, audio_tools.ensure_codebooks)
+        self.assertIs(s.graph_build, audio_graph.build)
+        self.assertIs(s.referenced_media, audio_graph.referenced_media)
+        self.assertIs(s.convert, audio_convert.convert)
+        self.assertIs(s.install, audio_install.install)
+        self.assertEqual(s.graph_version, audio_graph.VERSION)
+        self.assertEqual(s.convert_version, audio_convert.VERSION)
+
+
 if __name__ == "__main__":
     unittest.main()

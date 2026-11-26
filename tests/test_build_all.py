@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -180,6 +181,15 @@ class BuildProjectTests(unittest.TestCase):
                                     audio_build=audio_build, import_=lambda *a: calls.append("import") or 0,
                                     log=lambda *a: None)
         self.assertEqual(calls, [])
+
+
+    def test_default_audio_step_is_the_audio_pipeline(self):
+        """A fresh build_all run converts the audio and builds the graph through pipeline.audio.build."""
+        c = SimpleNamespace(work_dir=Path("/w"), unity_editor=Path("/u/Unity"))
+        with mock.patch.object(build_all.audio, "build") as build:
+            build_all.build_project(c, Path("/p"), Path("/w/project"), prepare=lambda *a: False,
+                                    import_=lambda *a: 0, log=lambda *a: None)
+        build.assert_called_once_with(Path("/w"), Path("/w/project"))
 
 
 if __name__ == "__main__":
