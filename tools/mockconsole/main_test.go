@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -173,5 +174,166 @@ func TestCLIBotSkipsNonBotScenario(t *testing.T) {
 	code := run(context.Background(), []string{"-auto", "-bot", "-scenario", "scenarios/replaced.json"}, &out, &errb)
 	if code != 0 || !strings.Contains(errb.String(), "bot false") {
 		t.Errorf("exit %d: %s", code, errb.String())
+	}
+}
+
+// sendAction returns the action of the step's first ClientQuizCommandMessage or
+// ClientStartDrawingCommandMessage send, or -1.
+func sendAction(st *console.Step) int {
+	for _, s := range st.Send {
+		m, _ := s["msg"].(map[string]any)
+		switch m["TypeString"] {
+		case "ClientQuizCommandMessage", "ClientStartDrawingCommandMessage":
+			if n, ok := console.AsInt(m["action"]); ok {
+				return int(n)
+			}
+		}
+	}
+	return -1
+}
+
+func tapsTarget(st *console.Step, target string) bool {
+	for _, a := range st.Page {
+		if a["do"] == "tap" && a["target"] == target {
+			return true
+		}
+	}
+	return false
+}
+
+// drawingUpload reports whether the step expects a drawing upload (an upload
+// next to TrophyDrawingColouringInfoMessage, or one of ImgType 1).
+func drawingUpload(t *testing.T, where string, st *console.Step) bool {
+	var ups []*console.Expect
+	info := false
+	for _, m := range st.Expect {
+		e, err := console.ParseExpect(m)
+		if err != nil {
+			t.Fatalf("%s: %v", where, err)
+		}
+		switch {
+		case e.Kind == "upload":
+			ups = append(ups, e)
+		case e.Kind == "msg" && e.Msg == "TrophyDrawingColouringInfoMessage":
+			info = true
+		}
+	}
+	drawing := info
+	for _, e := range ups {
+		if e.ImgType == 1 {
+			drawing = true
+		}
+	}
+	if !drawing {
+		return false
+	}
+	if len(ups) != 1 || !info {
+		t.Errorf("%s: a drawing step expects one upload and TrophyDrawingColouringInfoMessage", where)
+		return true
+	}
+	e := ups[0]
+	if (e.ImgType != 1 && e.ImgType != 5) || e.Width != 384 || e.Height != 512 || e.MaxBytes != 128000 || e.CaptureName == "" {
+		t.Errorf("%s: drawing upload must be ImgType 1 or 5, 384x512, maxBytes 128000, captured: %+v", where, e)
+	}
+	return true
+}
+
+// TestDrawStepSemantics: the page uploads a drawing when the player confirms
+// it; SendDrawing (19) / SendQuickDrawDrawing (28) only force out a drawing
+// that was not confirmed (phone-app.md, DRAWING 7).
+func TestDrawStepSemantics(t *testing.T) {
+	forced := 0
+	for _, f := range scenarioFiles(t) {
+		sc, err := console.LoadScenario(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		drawing, confirmed := false, false
+		for i := range sc.Steps {
+			st := &sc.Steps[i]
+			where := sc.Name + "/" + st.ID
+			act := sendAction(st)
+			if act == 7 || act == 27 {
+				drawing, confirmed = true, false
+			}
+			up := drawingUpload(t, where, st)
+			if tapsTarget(st, "draw-confirm") {
+				if !drawing {
+					t.Errorf("%s: draw-confirm outside a drawing", where)
+				}
+				if !up {
+					t.Errorf("%s: draw-confirm must expect the drawing upload", where)
+				}
+				confirmed = true
+				continue
+			}
+			if act == 19 || act == 28 {
+				if st.Screen != "holding" || st.Variant != "look-at-tv" {
+					t.Errorf("%s: send drawing must end on holding:look-at-tv", where)
+				}
+				if confirmed && up {
+					t.Errorf("%s: drawing already confirmed, the send must not expect a second upload", where)
+				}
+				if confirmed {
+					if len(st.Expect) != 1 || st.Expect[0]["none_ms"] == nil {
+						t.Errorf("%s: after a confirmed drawing the send expects only none_ms", where)
+					}
+				}
+				if drawing && !confirmed {
+					if !up {
+						t.Errorf("%s: forced send must expect the drawing upload", where)
+					}
+					forced++
+				}
+				drawing, confirmed = false, false
+				continue
+			}
+			if up {
+				t.Errorf("%s: drawing upload outside a confirm or send step", where)
+			}
+		}
+	}
+	if forced == 0 {
+		t.Error("no scenario forces out an unconfirmed drawing")
+	}
+}
+
+func TestProfileExercisesCameraEffects(t *testing.T) {
+	sc, err := console.LoadScenario("scenarios/profile.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st *console.Step
+	for i := range sc.Steps {
+		if sc.Steps[i].ID == "selfie" {
+			st = &sc.Steps[i]
+		}
+	}
+	if st == nil {
+		t.Fatal("no selfie step")
+	}
+	next := 0
+	for k := 0; k < len(st.Page); k++ {
+		a := st.Page[k]
+		if a["target"] == "shutter" {
+			break
+		}
+		if a["do"] != "tap" || a["target"] != "effects" {
+			continue
+		}
+		if k+3 >= len(st.Page) {
+			t.Fatalf("effect %d: sequence cut short", next)
+		}
+		pick, wait, shot := st.Page[k+1], st.Page[k+2], st.Page[k+3]
+		want := "effect-" + strconv.Itoa(next)
+		ms, _ := console.AsInt(wait["ms"])
+		if pick["do"] != "tap" || pick["target"] != want || wait["do"] != "wait" || ms < 1000 || shot["do"] != "screenshot" || shot["name"] != want {
+			t.Fatalf("effect %d: got %v %v %v", next, pick, wait, shot)
+		}
+		next++
+		k += 3
+	}
+	if next != 12 {
+		t.Errorf("effects exercised before the shutter: %d, want 12", next)
 	}
 }

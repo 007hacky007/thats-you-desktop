@@ -192,9 +192,13 @@ type stepRun struct {
 	state     string
 	start     time.Time
 	ready     time.Time
-	deadline  time.Time
-	done      chan struct{}
-	finished  bool
+	// pageActions: an external driver performs the step's page actions after
+	// the sends, so none_ms windows wait for pageDone (see PageDone).
+	pageActions bool
+	pageDone    time.Time
+	deadline    time.Time
+	done        chan struct{}
+	finished    bool
 }
 
 // Console is the mock game.
@@ -867,13 +871,25 @@ func (c *Console) SendRaw(p int, m map[string]any) error {
 
 // ---- steps ----
 
+// StartOptions changes how a step is run.
+type StartOptions struct {
+	// PageActions tells the console that a driver (the e2e harness) performs
+	// the step's page actions after the sends. none_ms windows (and, in strict
+	// order, the clock of a none item) then start only after PageDone or, when
+	// PageDone never comes, at the step timeout.
+	PageActions bool
+}
+
 // StartStep sends step i and starts waiting for its expectations.
-func (c *Console) StartStep(i int) error {
+func (c *Console) StartStep(i int) error { return c.StartStepWith(i, StartOptions{}) }
+
+// StartStepWith is StartStep with options.
+func (c *Console) StartStepWith(i int, opt StartOptions) error {
 	if i < 0 || i >= len(c.sc.Steps) {
 		return fmt.Errorf("no step %d", i)
 	}
 	st := &c.sc.Steps[i]
-	run := &stepRun{index: i, step: st, strict: st.Order != "any", state: "sent", done: make(chan struct{})}
+	run := &stepRun{index: i, step: st, strict: st.Order != "any", state: "sent", done: make(chan struct{}), pageActions: opt.PageActions}
 	for _, m := range st.Expect {
 		e, err := ParseExpect(m)
 		if err != nil {
@@ -898,6 +914,71 @@ func (c *Console) StartStep(i int) error {
 	return nil
 }
 
+// ErrNotRunning is returned by PageDone for a step that is not the current one.
+var ErrNotRunning = errors.New("step is not the current step")
+
+// PageDone marks the end of the page actions of step i (started with
+// PageActions): its none_ms windows start now. It returns whether the step
+// was still running; calling it for a finished current step is not an error.
+func (c *Console) PageDone(i int) (bool, error) {
+	if i < 0 || i >= len(c.sc.Steps) {
+		return false, fmt.Errorf("no step %d", i)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	run := c.step
+	if run == nil || run.index != i {
+		return false, ErrNotRunning
+	}
+	if run.finished {
+		return false, nil
+	}
+	if run.pageActions && run.pageDone.IsZero() {
+		now := time.Now()
+		run.pageDone = now
+		c.extendForNoneLocked(run, now)
+		c.evaluateLocked(nil, now)
+	}
+	return !run.finished, nil
+}
+
+// noneBase is when none_ms windows may start (zero: not yet).
+func noneBase(run *stepRun) time.Time {
+	if run.ready.IsZero() {
+		return time.Time{}
+	}
+	b := run.ready
+	if run.pageActions {
+		if run.pageDone.IsZero() {
+			return time.Time{}
+		}
+		if run.pageDone.After(b) {
+			b = run.pageDone
+		}
+	}
+	return b
+}
+
+// extendForNoneLocked moves the deadline so that the unmatched none_ms
+// windows starting at from still fit.
+func (c *Console) extendForNoneLocked(run *stepRun, from time.Time) {
+	if run.ready.IsZero() {
+		return
+	}
+	var total time.Duration
+	for k, e := range run.exps {
+		if !run.matched[k] && e.Kind == "none" {
+			total += time.Duration(e.NoneMs) * time.Millisecond
+		}
+	}
+	if total == 0 {
+		return
+	}
+	if d := from.Add(total + 500*time.Millisecond); d.After(run.deadline) {
+		run.deadline = d
+	}
+}
+
 func (c *Console) runStep(run *stepRun) {
 	var sendErrs []string
 	for j, m := range run.step.Send {
@@ -914,6 +995,9 @@ func (c *Console) runStep(run *stepRun) {
 	run.state = "waiting"
 	run.ready = time.Now()
 	run.deadline = run.ready.Add(time.Duration(run.step.Timeout()) * time.Millisecond)
+	if run.pageActions && !run.pageDone.IsZero() {
+		c.extendForNoneLocked(run, run.ready)
+	}
 	c.results[run.index].State = "waiting"
 	hooks := append([]func(int){}, c.hooks...)
 	c.evaluateLocked(nil, run.ready)
@@ -1065,7 +1149,7 @@ func (c *Console) evaluateLocked(it *Item, now time.Time) {
 			}
 			if !matchedItem && isActivity(it) {
 				for k, e := range run.exps {
-					if !run.matched[k] && e.Kind == "none" && it.Player == c.expPlayer(run, e) && !run.ready.IsZero() {
+					if !run.matched[k] && e.Kind == "none" && it.Player == c.expPlayer(run, e) && !noneBase(run).IsZero() {
 						run.errors = append(run.errors, fmt.Sprintf("expected nothing for %d ms, got %s", e.NoneMs, it.Summary()))
 						run.matched[k] = true
 					}
@@ -1078,11 +1162,12 @@ func (c *Console) evaluateLocked(it *Item, now time.Time) {
 		return
 	}
 	// clock: none_ms windows
+	base := noneBase(run)
 	if run.strict {
-		c.startNoneLocked(run, run.ready)
+		c.startNoneLocked(run, base)
 		for {
 			k := firstUnmatched(run)
-			if k < 0 || run.exps[k].Kind != "none" || now.Sub(run.noneStart[k]) < time.Duration(run.exps[k].NoneMs)*time.Millisecond {
+			if k < 0 || run.exps[k].Kind != "none" || run.noneStart[k].IsZero() || now.Sub(run.noneStart[k]) < time.Duration(run.exps[k].NoneMs)*time.Millisecond {
 				break
 			}
 			run.matched[k] = true
@@ -1090,7 +1175,7 @@ func (c *Console) evaluateLocked(it *Item, now time.Time) {
 		}
 	} else {
 		for k, e := range run.exps {
-			if !run.matched[k] && e.Kind == "none" && now.Sub(run.ready) >= time.Duration(e.NoneMs)*time.Millisecond {
+			if !run.matched[k] && e.Kind == "none" && !base.IsZero() && now.Sub(base) >= time.Duration(e.NoneMs)*time.Millisecond {
 				run.matched[k] = true
 			}
 		}
@@ -1100,6 +1185,14 @@ func (c *Console) evaluateLocked(it *Item, now time.Time) {
 		return
 	}
 	if now.After(run.deadline) {
+		if run.pageActions && run.pageDone.IsZero() && onlyNoneLeft(run) {
+			// no page-done: the none_ms windows start at the timeout
+			c.opt.Logf("step %d %s: no page-done before the timeout, starting none_ms windows", run.index, run.step.ID)
+			run.pageDone = now
+			c.extendForNoneLocked(run, now)
+			c.evaluateLocked(nil, now)
+			return
+		}
 		var errs []string
 		for k, e := range run.exps {
 			if !run.matched[k] {
@@ -1115,16 +1208,30 @@ func (c *Console) evaluateLocked(it *Item, now time.Time) {
 }
 
 func (c *Console) startNoneLocked(run *stepRun, at time.Time) {
-	if run.ready.IsZero() {
+	base := noneBase(run)
+	if base.IsZero() {
 		return
 	}
 	k := firstUnmatched(run)
 	if k >= 0 && run.exps[k].Kind == "none" && run.noneStart[k].IsZero() {
-		if at.Before(run.ready) {
-			at = run.ready
+		if at.Before(base) {
+			at = base
 		}
 		run.noneStart[k] = at
 	}
+}
+
+func onlyNoneLeft(run *stepRun) bool {
+	any := false
+	for k, e := range run.exps {
+		if !run.matched[k] {
+			if e.Kind != "none" {
+				return false
+			}
+			any = true
+		}
+	}
+	return any
 }
 
 func firstUnmatched(run *stepRun) int {

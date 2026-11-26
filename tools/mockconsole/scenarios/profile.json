@@ -127,10 +127,202 @@
     },
     {
       "id": "selfie",
-      "doc": "take the selfie",
+      "doc": "selfie: open the effects panel and pick each effect 0..11 (the panel closes on pick), screenshot each, then take the photo with the last effect",
       "player": 0,
       "screen": "selfie",
       "page": [
+        {
+          "do": "tap",
+          "target": "effects"
+        },
+        {
+          "do": "tap",
+          "target": "effect-0"
+        },
+        {
+          "do": "wait",
+          "ms": 1500
+        },
+        {
+          "do": "screenshot",
+          "name": "effect-0"
+        },
+        {
+          "do": "tap",
+          "target": "effects"
+        },
+        {
+          "do": "tap",
+          "target": "effect-1"
+        },
+        {
+          "do": "wait",
+          "ms": 1500
+        },
+        {
+          "do": "screenshot",
+          "name": "effect-1"
+        },
+        {
+          "do": "tap",
+          "target": "effects"
+        },
+        {
+          "do": "tap",
+          "target": "effect-2"
+        },
+        {
+          "do": "wait",
+          "ms": 1500
+        },
+        {
+          "do": "screenshot",
+          "name": "effect-2"
+        },
+        {
+          "do": "tap",
+          "target": "effects"
+        },
+        {
+          "do": "tap",
+          "target": "effect-3"
+        },
+        {
+          "do": "wait",
+          "ms": 1500
+        },
+        {
+          "do": "screenshot",
+          "name": "effect-3"
+        },
+        {
+          "do": "tap",
+          "target": "effects"
+        },
+        {
+          "do": "tap",
+          "target": "effect-4"
+        },
+        {
+          "do": "wait",
+          "ms": 1500
+        },
+        {
+          "do": "screenshot",
+          "name": "effect-4"
+        },
+        {
+          "do": "tap",
+          "target": "effects"
+        },
+        {
+          "do": "tap",
+          "target": "effect-5"
+        },
+        {
+          "do": "wait",
+          "ms": 1500
+        },
+        {
+          "do": "screenshot",
+          "name": "effect-5"
+        },
+        {
+          "do": "tap",
+          "target": "effects"
+        },
+        {
+          "do": "tap",
+          "target": "effect-6"
+        },
+        {
+          "do": "wait",
+          "ms": 1500
+        },
+        {
+          "do": "screenshot",
+          "name": "effect-6"
+        },
+        {
+          "do": "tap",
+          "target": "effects"
+        },
+        {
+          "do": "tap",
+          "target": "effect-7"
+        },
+        {
+          "do": "wait",
+          "ms": 1500
+        },
+        {
+          "do": "screenshot",
+          "name": "effect-7"
+        },
+        {
+          "do": "tap",
+          "target": "effects"
+        },
+        {
+          "do": "tap",
+          "target": "effect-8"
+        },
+        {
+          "do": "wait",
+          "ms": 1500
+        },
+        {
+          "do": "screenshot",
+          "name": "effect-8"
+        },
+        {
+          "do": "tap",
+          "target": "effects"
+        },
+        {
+          "do": "tap",
+          "target": "effect-9"
+        },
+        {
+          "do": "wait",
+          "ms": 1500
+        },
+        {
+          "do": "screenshot",
+          "name": "effect-9"
+        },
+        {
+          "do": "tap",
+          "target": "effects"
+        },
+        {
+          "do": "tap",
+          "target": "effect-10"
+        },
+        {
+          "do": "wait",
+          "ms": 1500
+        },
+        {
+          "do": "screenshot",
+          "name": "effect-10"
+        },
+        {
+          "do": "tap",
+          "target": "effects"
+        },
+        {
+          "do": "tap",
+          "target": "effect-11"
+        },
+        {
+          "do": "wait",
+          "ms": 1500
+        },
+        {
+          "do": "screenshot",
+          "name": "effect-11"
+        },
         {
           "do": "tap",
           "target": "shutter"
@@ -141,7 +333,7 @@
         }
       ],
       "expect": [],
-      "timeout_ms": 20000
+      "timeout_ms": 60000
     },
     {
       "id": "confirm",

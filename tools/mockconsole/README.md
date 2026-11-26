@@ -98,11 +98,25 @@ Scenarios: join, profile, thats-you, would-you-rather, blank-you, top-drawer, ca
 - `GET /` status page: QR code, join URL, live sessions, the step list with Run buttons and the last result. `GET /qr.png`.
 - `GET /api/info` -> `{ "join_url", "ip", "udp", "scenario", "players", "steps": [ids] }`.
 - `GET /api/state` -> `{ "sessions": [{ "session", "uid", "player", "state", "player_id", "slot", "addr" }], "step": { "index", "id", "state" }, "players": [...], "captures": {...} }`. Session states: open, hello, pending, joined, assigned, refused, replaced, closing, closed. Step states: idle, sent, waiting, passed, failed.
-- `POST /api/steps/<i>/start` -> `{ "ok": true }` (409 while another step runs).
+- `POST /api/steps/<i>/start` with an optional body `{ "page_actions": true }` -> `{ "ok": true }` (409 while another step runs, 400 for a bad body). Without the flag (empty body or `{}`; the bot and the Run buttons) none_ms windows start when the sends are done. With it, none_ms windows (and, in strict order, the clock of a none item) start only at `page-done`, or at the step timeout when `page-done` never comes (the deadline is then extended by the remaining none_ms). Frames sent while the page actions run do not count against a none_ms item.
+- `POST /api/steps/<i>/page-done` -> `{ "ok": true, "running": bool }`: the driver (the e2e harness) finished step i's page actions. `running` is false when the step had already finished, which is not an error. 409 when step i is not the current step, 400 for a bad index.
 - `GET /api/steps/<i>/result?timeout_ms=N` blocks up to N ms -> `{ "index", "id", "pass", "done", "state", "errors", "received": [{ "type", "at_ms", "summary", "matched", "player" }] }`.
 - `GET /api/received?since=SEQ` -> `{ "next", "items": [{ "seq", "session", "player", "kind", "frame", "transfer_id", "len", "valid", "errors" }] }` (pings are not listed).
 - `POST /api/send` with `{ "player": 0, "msg" | "frame" | "content" | "resource" | "manifest" | "close": ... }` -> `{ "ok": true }`.
 - `POST /api/quit`.
+
+## Scenario conventions
+
+- Drawings (phone-app.md, DRAWING 7): the page uploads a drawing when the player confirms it (`draw-confirm`), so a draw step that taps `draw-confirm` expects the upload (ImgType 1, or 5 for QuickDraw, 384x512, maxBytes 128000, captured) plus TrophyDrawingColouringInfoMessage. The following SendDrawing (19) or SendQuickDrawDrawing (28) step expects only `none_ms` and the `holding`/`look-at-tv` screen. A 19/28 after a drawing that was not confirmed forces it out and expects the upload: quickdraw's `draw-unconfirmed` + `forced-send` steps cover that path. `TestDrawStepSemantics` (main_test.go) enforces these rules for every scenario.
+- Camera effects: profile's `selfie` step opens the effects panel (`effects`), picks `effect-N` for N = 0..11 (the panel closes on pick, so it is reopened each time), waits 1500 ms and takes a `screenshot` named `effect-N`, then takes the photo with the last effect. `TestProfileExercisesCameraEffects` checks the sequence.
+
+Checks before committing a scenario change:
+
+```
+cd tools/mockconsole
+go run . -check scenarios/*.json      # schema and catalogue
+go vet ./... && go test ./...          # semantics tests and every scenario played by the bot
+```
 
 ## Manual play with a real phone
 

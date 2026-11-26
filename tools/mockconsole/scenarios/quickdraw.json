@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "name": "quickdraw",
-  "description": "QuickDraw: selfie, holding screen, QuickDrawDrawing, SendQuickDrawDrawing, final vote as roundID 8.",
+  "description": "QuickDraw: selfie, holding screen, a confirmed QuickDrawDrawing, SendQuickDrawDrawing, a second drawing forced out by SendQuickDrawDrawing, final vote as roundID 8.",
   "players": 1,
   "auto": {
     "join": true,
@@ -183,7 +183,7 @@
     },
     {
       "id": "draw",
-      "doc": "QuickDrawDrawing",
+      "doc": "QuickDrawDrawing (27), confirmed by the player: upload ImgType 5 at 384x512 and colouring info on confirm",
       "player": 0,
       "send": [
         {
@@ -223,28 +223,6 @@
       ],
       "expect": [
         {
-          "none_ms": 1000
-        }
-      ],
-      "timeout_ms": 20000
-    },
-    {
-      "id": "send-drawing",
-      "doc": "SendQuickDrawDrawing",
-      "player": 0,
-      "send": [
-        {
-          "msg": {
-            "TypeString": "ClientQuizCommandMessage",
-            "action": 28,
-            "time": 0.0
-          }
-        }
-      ],
-      "screen": "holding",
-      "variant": "look-at-tv",
-      "expect": [
-        {
           "upload": {
             "ImgType": 5,
             "width": 384,
@@ -267,6 +245,137 @@
       "timeout_ms": 20000
     },
     {
+      "id": "send-drawing",
+      "doc": "SendQuickDrawDrawing (28) after a confirmed drawing: no second upload, the page shows look at TV",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 28,
+            "time": 0.0
+          }
+        }
+      ],
+      "screen": "holding",
+      "variant": "look-at-tv",
+      "expect": [
+        {
+          "none_ms": 1000
+        }
+      ]
+    },
+    {
+      "id": "holding-2",
+      "doc": "second QuickDraw holding screen, one drawing remaining",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuickDrawHoldingScreenCommandMessage",
+            "action": 5,
+            "time": 0.0,
+            "HoldingScreenText": "***NOTSETHOLDINGSCREENTEXT",
+            "HoldingScreenType": 5,
+            "OtherPlayerIndex": -1,
+            "ShowPortraitPhotoControls": false,
+            "ImageGUID": "$guid:qd_prev",
+            "Heading": "Draw on Bob",
+            "Description": "Make it better",
+            "NumberOfDrawingsRemaining": 1,
+            "PlayerName": "Bob"
+          }
+        }
+      ],
+      "screen": "quickdraw-holding",
+      "expect": [
+        {
+          "none_ms": 500
+        }
+      ]
+    },
+    {
+      "id": "draw-unconfirmed",
+      "doc": "QuickDrawDrawing (27) again; the player draws but never confirms, so nothing is sent",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 27,
+            "time": 0.0
+          }
+        }
+      ],
+      "screen": "draw",
+      "variant": "quickdraw",
+      "page": [
+        {
+          "do": "draw",
+          "target": "draw-canvas",
+          "points": [
+            [
+              0.2,
+              0.2
+            ],
+            [
+              0.8,
+              0.3
+            ],
+            [
+              0.5,
+              0.8
+            ]
+          ],
+          "steps": 12
+        }
+      ],
+      "expect": [
+        {
+          "none_ms": 1000
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "forced-send",
+      "doc": "SendQuickDrawDrawing (28) forces the unconfirmed drawing out: upload ImgType 5 and colouring info",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 28,
+            "time": 0.0
+          }
+        }
+      ],
+      "screen": "holding",
+      "variant": "look-at-tv",
+      "expect": [
+        {
+          "upload": {
+            "ImgType": 5,
+            "width": 384,
+            "height": 512,
+            "maxBytes": 128000
+          },
+          "capture": "qd_draw2"
+        },
+        {
+          "msg": "TrophyDrawingColouringInfoMessage",
+          "fields": {
+            "ImageGUID": "$cap:qd_draw2",
+            "ColoursAvailable": 32766,
+            "ColoursUsed": {
+              "ge": 0
+            }
+          }
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
       "id": "vote-manifest",
       "doc": "drawings in slot order",
       "player": 0,
@@ -279,6 +388,10 @@
             },
             {
               "guid": "$cap:qd_draw",
+              "r": 1
+            },
+            {
+              "guid": "$cap:qd_draw2",
               "r": 1
             }
           ]
@@ -318,7 +431,8 @@
             "jokersEnabled": false,
             "ImageGUIDs": [
               "$cap:qd_draw",
-              "$guid:qd_other"
+              "$guid:qd_other",
+              "$cap:qd_draw2"
             ]
           }
         }

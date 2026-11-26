@@ -1,7 +1,6 @@
 package console
 
 import (
-	"errors"
 	"html/template"
 	"io"
 	"net/http"
@@ -68,22 +67,7 @@ func (c *Console) Handler(servePage string) http.Handler {
 	})
 	mux.HandleFunc("GET /api/info", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, c.Info()) })
 	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, c.State()) })
-	mux.HandleFunc("POST /api/steps/{i}/start", func(w http.ResponseWriter, r *http.Request) {
-		i, err := strconv.Atoi(r.PathValue("i"))
-		if err != nil {
-			writeErr(w, 400, "bad step index")
-			return
-		}
-		if err := c.StartStep(i); err != nil {
-			code := 400
-			if errors.Is(err, ErrBusy) {
-				code = 409
-			}
-			writeErr(w, code, err.Error())
-			return
-		}
-		writeJSON(w, 200, map[string]any{"ok": true})
-	})
+	c.registerStepAPI(mux)
 	mux.HandleFunc("GET /api/steps/{i}/result", func(w http.ResponseWriter, r *http.Request) {
 		i, err := strconv.Atoi(r.PathValue("i"))
 		if err != nil {

@@ -111,7 +111,7 @@
     },
     {
       "id": "draw",
-      "doc": "draw on the canvas",
+      "doc": "drawing confirmed by the player: upload ImgType 1 and colouring info on confirm, then look at TV",
       "player": 0,
       "send": [
         {
@@ -179,28 +179,6 @@
       ],
       "expect": [
         {
-          "none_ms": 1000
-        }
-      ],
-      "timeout_ms": 20000
-    },
-    {
-      "id": "send-drawing",
-      "doc": "SendDrawing",
-      "player": 0,
-      "send": [
-        {
-          "msg": {
-            "TypeString": "ClientQuizCommandMessage",
-            "action": 19,
-            "time": 0.0
-          }
-        }
-      ],
-      "screen": "holding",
-      "variant": "look-at-tv",
-      "expect": [
-        {
           "upload": {
             "ImgType": 1,
             "width": 384,
@@ -221,6 +199,27 @@
         }
       ],
       "timeout_ms": 20000
+    },
+    {
+      "id": "send-drawing",
+      "doc": "SendDrawing (19) after a confirmed drawing: no second upload, the page stays on look at TV",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 19,
+            "time": 0.0
+          }
+        }
+      ],
+      "screen": "holding",
+      "variant": "look-at-tv",
+      "expect": [
+        {
+          "none_ms": 1000
+        }
+      ]
     },
     {
       "id": "vote-manifest",

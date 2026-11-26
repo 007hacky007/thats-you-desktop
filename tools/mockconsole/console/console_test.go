@@ -2,7 +2,9 @@ package console
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -408,5 +410,182 @@ func TestStepHookAndSendErrors(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Error("hook not called")
+	}
+}
+
+const pageActionsScenario = `{"schema":1,"name":"s","players":1,"steps":[
+ {"id":"join","player":0,"page":[{"do":"tap","target":"connect-play"}],"expect":[{"frame":"hello"},{"msg":"ClientRequestPlayerIDMessage"}]},
+ {"id":"quiet","player":0,"expect":[{"none_ms":300}],"timeout_ms":5000},
+ {"id":"msg-then-quiet","player":0,"expect":[{"msg":"ContinuePressedResponseMessage"},{"none_ms":300}],"timeout_ms":5000},
+ {"id":"any","player":0,"order":"any","expect":[{"none_ms":300},{"msg":"ContinuePressedResponseMessage"}],"timeout_ms":5000},
+ {"id":"short","player":0,"expect":[{"none_ms":200}],"timeout_ms":300}
+]}`
+
+const continueMsg = `{"TypeString":"ContinuePressedResponseMessage","Response":3}`
+
+func joinedPage(t *testing.T, c *Console, m *MemTransport) fakePage {
+	t.Helper()
+	a := fakePage{t, m, 1}
+	c.StartStep(0)
+	a.hello("u0")
+	a.waitLabel("SessionStateMessage")
+	a.msg(fmt.Sprintf(reqPID, "u0"))
+	if r, _ := c.Result(0, 3*time.Second); !r.Pass {
+		t.Fatal(r)
+	}
+	return a
+}
+
+func TestPageActionsStrictNoneWaitsForPageDone(t *testing.T) {
+	c, m := newConsole(t, pageActionsScenario)
+	a := joinedPage(t, c, m)
+	if err := c.StartStepWith(1, StartOptions{PageActions: true}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	a.msg(continueMsg) // a page action's message before page-done: not a violation
+	time.Sleep(400 * time.Millisecond)
+	if r, _ := c.Result(1, 0); r.Done {
+		t.Fatalf("finished before page-done: %+v", r)
+	}
+	t0 := time.Now()
+	if running, err := c.PageDone(1); err != nil || !running {
+		t.Fatalf("page-done %v %v", running, err)
+	}
+	r, _ := c.Result(1, 3*time.Second)
+	if !r.Pass {
+		t.Fatalf("quiet after page-done: %+v", r)
+	}
+	if d := time.Since(t0); d < 280*time.Millisecond {
+		t.Errorf("none window ended %v after page-done", d)
+	}
+	if running, err := c.PageDone(1); err != nil || running {
+		t.Errorf("page-done after finish: %v %v", running, err)
+	}
+	if _, err := c.PageDone(2); !errors.Is(err, ErrNotRunning) {
+		t.Errorf("page-done of another step: %v", err)
+	}
+	if _, err := c.PageDone(99); err == nil {
+		t.Error("page-done of a missing step")
+	}
+
+	// activity after page-done is a violation
+	c.StartStepWith(1, StartOptions{PageActions: true})
+	time.Sleep(50 * time.Millisecond)
+	c.PageDone(1)
+	time.Sleep(50 * time.Millisecond)
+	a.msg(continueMsg)
+	r, _ = c.Result(1, 3*time.Second)
+	if r.Pass || !strings.Contains(strings.Join(r.Errors, "|"), "expected nothing") {
+		t.Errorf("violation after page-done: %+v", r)
+	}
+}
+
+func TestPageActionsMsgThenNone(t *testing.T) {
+	c, m := newConsole(t, pageActionsScenario)
+	a := joinedPage(t, c, m)
+	c.StartStepWith(2, StartOptions{PageActions: true})
+	time.Sleep(50 * time.Millisecond)
+	a.msg(continueMsg)
+	time.Sleep(500 * time.Millisecond)
+	if r, _ := c.Result(2, 0); r.Done {
+		t.Fatalf("finished before page-done: %+v", r)
+	}
+	c.PageDone(2)
+	if r, _ := c.Result(2, 3*time.Second); !r.Pass {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestPageActionsAnyOrder(t *testing.T) {
+	c, m := newConsole(t, pageActionsScenario)
+	a := joinedPage(t, c, m)
+	c.StartStepWith(3, StartOptions{PageActions: true})
+	time.Sleep(50 * time.Millisecond)
+	a.msg(continueMsg)
+	a.msg(`{"TypeString":"StartGameButtonPressedResponseMessage","Response":9}`) // unmatched, before page-done
+	time.Sleep(400 * time.Millisecond)
+	if r, _ := c.Result(3, 0); r.Done {
+		t.Fatalf("finished before page-done: %+v", r)
+	}
+	c.PageDone(3)
+	if r, _ := c.Result(3, 3*time.Second); !r.Pass {
+		t.Fatalf("%+v", r)
+	}
+	// without the flag the window starts at once and the same traffic fails
+	c.StartStep(3)
+	time.Sleep(50 * time.Millisecond)
+	a.msg(continueMsg)
+	a.msg(`{"TypeString":"StartGameButtonPressedResponseMessage","Response":9}`)
+	if r, _ := c.Result(3, 3*time.Second); r.Pass {
+		t.Fatalf("unflagged run passed: %+v", r)
+	}
+}
+
+func TestPageActionsTimeoutStartsNone(t *testing.T) {
+	c, m := newConsole(t, pageActionsScenario)
+	joinedPage(t, c, m)
+	t0 := time.Now()
+	c.StartStepWith(4, StartOptions{PageActions: true})
+	r, _ := c.Result(4, 3*time.Second)
+	if !r.Pass {
+		t.Fatalf("%+v", r)
+	}
+	if d := time.Since(t0); d < 480*time.Millisecond {
+		t.Errorf("finished after %v, want timeout 300 + none 200", d)
+	}
+}
+
+func TestHTTPPageActions(t *testing.T) {
+	c, m := newConsole(t, pageActionsScenario)
+	a := joinedPage(t, c, m)
+	srv := httptest.NewServer(c.Handler(t.TempDir()))
+	defer srv.Close()
+	var out map[string]any
+	if code := postJSON(t, srv.URL+"/api/steps/1/start", `{"page_actions":"yes"}`, &out); code != 400 {
+		t.Errorf("bad flag %d", code)
+	}
+	if code := postJSON(t, srv.URL+"/api/steps/1/start", `{"other":true}`, &out); code != 400 {
+		t.Errorf("unknown key %d", code)
+	}
+	if code := postJSON(t, srv.URL+"/api/steps/1/start", `[1]`, &out); code != 400 {
+		t.Errorf("not an object %d", code)
+	}
+	if code := postJSON(t, srv.URL+"/api/steps/1/start", `{"page_actions":true}`, &out); code != 200 {
+		t.Fatalf("start %d %v", code, out)
+	}
+	time.Sleep(50 * time.Millisecond)
+	a.msg(continueMsg)
+	time.Sleep(400 * time.Millisecond)
+	var res StepResult
+	getJSON(t, srv.URL+"/api/steps/1/result", &res)
+	if res.Done {
+		t.Fatalf("finished before page-done: %+v", res)
+	}
+	if code := postJSON(t, srv.URL+"/api/steps/2/page-done", ``, &out); code != 409 {
+		t.Errorf("page-done other step %d", code)
+	}
+	if code := postJSON(t, srv.URL+"/api/steps/99/page-done", ``, &out); code != 400 {
+		t.Errorf("page-done missing step %d", code)
+	}
+	out = nil
+	if code := postJSON(t, srv.URL+"/api/steps/1/page-done", `{}`, &out); code != 200 || out["ok"] != true || out["running"] != true {
+		t.Fatalf("page-done %d %v", code, out)
+	}
+	getJSON(t, srv.URL+"/api/steps/1/result?timeout_ms=3000", &res)
+	if !res.Pass {
+		t.Fatalf("%+v", res)
+	}
+	out = nil
+	if code := postJSON(t, srv.URL+"/api/steps/1/page-done", ``, &out); code != 200 || out["running"] != false {
+		t.Errorf("late page-done %d %v", code, out)
+	}
+	// {} and an empty body keep the old behaviour
+	if code := postJSON(t, srv.URL+"/api/steps/1/start", `{}`, &out); code != 200 {
+		t.Fatalf("start {} %d", code)
+	}
+	getJSON(t, srv.URL+"/api/steps/1/result?timeout_ms=3000", &res)
+	if !res.Pass {
+		t.Fatalf("unflagged quiet: %+v", res)
 	}
 }
