@@ -9,6 +9,10 @@ export const demos = [
   { variant: 'waiting', data: { state: 'waiting' } },
 ];
 
+import { keepAwake } from '../wakelock.js';
+
+let awake = null; // one screen wake lock for the page's lifetime, started by the first PLAY tap
+
 export function connectLabels(state) {
   switch (state) {
     case 'noparams': return { button: null, status: '', help: 'port.scanQr', busy: false };
@@ -23,6 +27,7 @@ export function connectLabels(state) {
 // The PLAY tap: unlock sounds, ask for the camera inside the user gesture
 // (iOS needs that), then start the connection whatever the answer was.
 export async function playTapped({ media, game, sound, log }) {
+  if (!awake) awake = keepAwake();
   if (sound) {
     sound.unlock();
     sound.play('JOIN_PS4_BUTTON_CLICKED');

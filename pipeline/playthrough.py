@@ -1,11 +1,13 @@
 """Automated playthrough: the real Mac game plus N headless-Chrome phones playing whole games.
 
 CLI: python3 -m pipeline.playthrough [--phones 3] [--minutes 20] [--name NAME] [--keys KEYS] [--headful]
+                                     [--android [SERIAL]]
 
 Serves the built phone page (work/web-dist) on 127.0.0.1, starts the player with IWYK_PAGE_URL
 pointing at it and -portJoinUrlFile, opens one browser context per phone at the join URL (fake
 camera) and lets a simple policy play: join, name, card, selfie, hold START, answer, draw, type,
-take photos, continue. Every new phone screen is screenshotted. The TV is screenshotted by the
+take photos, continue. --android adds an Android Chrome (emulator or device, see
+android_phone.py) as phone 1 (it holds START). Every new phone screen is screenshotted. The TV is screenshotted by the
 in-game observer. Report: work/runs/<name>/playthrough.json (screens and variants each phone saw,
 TV scenes, stuck phones, page and player errors). Exit 0 iff no phone got stuck and nothing threw.
 """
@@ -164,6 +166,8 @@ def main(argv=None) -> int:
                     help="TV key script for the language select and splash (run_player --keys format)")
     ap.add_argument("--headful", action="store_true")
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--android", nargs="?", const="", default=None, metavar="SERIAL",
+                    help="also play on an Android Chrome over adb (optional device serial)")
     a = ap.parse_args(argv)
 
     from pipeline import config
@@ -210,8 +214,16 @@ def main(argv=None) -> int:
     rng = random.Random(a.seed)
     phones = []
     stuck: list[str] = []
+    droid = None
     try:
-        for i in range(a.phones):
+        if a.android is not None:
+            from pipeline import android_phone
+            droid = android_phone.AndroidPhone(a.android or None)
+            droid.prepare(int(base.rstrip("/").rsplit(":", 1)[1]))
+            i = len(phones)
+            phones.append(Phone(i, droid.open(url, run_dir / f"page-phone{i + 1}.log"), run_dir / "phones", rng))
+            log(f"phone {i + 1} is Android Chrome")
+        for i in range(len(phones), len(phones) + a.phones):
             page = browser.open_page(run_dir / f"page-phone{i + 1}.log")
             page.navigate(url)
             phones.append(Phone(i, page, run_dir / "phones", rng))
@@ -233,6 +245,8 @@ def main(argv=None) -> int:
                     p.since = time.monotonic()
             time.sleep(0.5)
     finally:
+        if droid:
+            droid.close()
         browser.close()
         server.shutdown()
     t.join(seconds + 30)
