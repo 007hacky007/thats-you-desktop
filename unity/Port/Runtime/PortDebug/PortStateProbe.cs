@@ -176,6 +176,9 @@ namespace PortDebug
             w.Key("text").Str(label is UILabel l ? l.text : null);
             w.Key("timeScale").Str(Time.timeScale.ToString(System.Globalization.CultureInfo.InvariantCulture));
             w.Key("time").Str(Time.time.ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
+            w.Key("real").Str(Time.realtimeSinceStartup.ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
+            w.Key("frames").Int(Time.frameCount);
+            w.Key("targetFps").Int(Application.targetFrameRate);
             w.End();
         }
 
