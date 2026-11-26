@@ -15,6 +15,13 @@ little endian, no type trees) and rewrites only textureType, sRGBTexture and alp
 in Assets/Texture2D/*.meta. Textures used by Sprite assets keep their Sprite import. It works on
 metas already upgraded by Unity 6 (first import); old-format metas are reported and left alone.
 
+The Unity 6 upgrade also leaves two DefaultTexturePlatform entries in platformSettings: the upgraded
+one (compression taken from the legacy textureFormat) and an overridden, compressed copy of the
+exported buildTargetSettings entry. Which one wins is undefined, so this step keeps only the first,
+clears its override flag and sets textureCompression from the original m_TextureFormat: uncompressed
+formats (Amplify Color LUTs are RGB24, UI masks Alpha8, ...) stay uncompressed instead of becoming
+DXT1/DXT5. Other platform entries keep overridden 0.
+
 Usage: python3 -m pipeline.fix_textures [--media DIR] [--project DIR] [--dry-run] [--json OUT]
 """
 from __future__ import annotations
@@ -33,6 +40,17 @@ from pipeline.config import REPO_ROOT
 TEXTURE2D = 28
 NORMAL_USAGES = (3, 4)  # TextureUsageMode NormalmapDXT5nm, NormalmapPlain
 TYPE_DEFAULT, TYPE_NORMAL = 0, 1
+COMPRESSION_NONE, COMPRESSION_NORMAL = 0, 1
+DEFAULT_PLATFORM = "DefaultTexturePlatform"
+# UnityEngine.TextureFormat values that store plain (non block-compressed) texels.
+UNCOMPRESSED_FORMATS = frozenset({
+    1, 2, 3, 4, 5, 7, 9,          # Alpha8 ARGB4444 RGB24 RGBA32 ARGB32 RGB565 R16
+    13, 14,                       # RGBA4444 BGRA32
+    15, 16, 17, 18, 19, 20,       # RHalf RGHalf RGBAHalf RFloat RGFloat RGBAFloat
+    21, 22,                       # YUY2 RGB9e5Float
+    62, 63, 72, 73, 74,           # RG16 R8 RG32 RGB48 RGBA64
+    75, 76, 77, 78,               # R8_SIGNED RG16_SIGNED RGB24_SIGNED RGBA32_SIGNED
+})
 
 
 @dataclass(frozen=True)
@@ -143,6 +161,62 @@ def desired(infos: list[TexInfo], is_sprite: bool) -> dict[str, int] | None:
     return {"textureType": TYPE_NORMAL if normal else TYPE_DEFAULT, "sRGBTexture": srgb, "alphaIsTransparency": 0}
 
 
+def compression_for(infos: list[TexInfo], legacy_format: int | None) -> int | None:
+    """textureCompression the Default platform should use, from the original texture format(s).
+    When same-named candidates disagree, the exported meta's legacy textureFormat (written from the
+    actual source object) decides, provided it is one of them."""
+    fmts = {i.fmt for i in infos}
+    if len(fmts) != 1:
+        if legacy_format is not None and (legacy_format in fmts or not fmts) and legacy_format >= 0:
+            fmts = {legacy_format}
+        else:
+            return None
+    return COMPRESSION_NONE if fmts.pop() in UNCOMPRESSED_FORMATS else COMPRESSION_NORMAL
+
+
+def legacy_texture_format(text: str) -> int | None:
+    m = re.search(r"^  textureFormat: (-?\d+)$", text, re.M)
+    return int(m.group(1)) if m else None
+
+
+_PLATFORM_BLOCK = re.compile(r"^  platformSettings:\n((?:  - .*\n(?:    .*\n)*)*)", re.M)
+
+
+def _set_entry_key(entry: str, key: str, value: int, insert_after: str | None = None) -> str:
+    pat = re.compile(rf"^(    {key}: )-?\d+$", re.M)
+    if pat.search(entry):
+        return pat.sub(lambda m: f"{m.group(1)}{value}", entry, count=1)
+    if insert_after is None:
+        return entry
+    anchor = re.search(rf"^    {insert_after}: .*\n", entry, re.M)
+    line = f"    {key}: {value}\n"
+    return entry[:anchor.end()] + line + entry[anchor.end():] if anchor else entry + line
+
+
+def normalize_platforms(text: str, compression: int) -> str:
+    """Keep one DefaultTexturePlatform entry (the first), non-overridden, with the given
+    textureCompression; clear the override flag on every other platform entry."""
+    m = _PLATFORM_BLOCK.search(text)
+    if not m:
+        raise KeyError("platformSettings")
+    entries = re.findall(r"  - .*\n(?:    .*\n)*", m.group(1))
+    out, seen_default = [], False
+    for e in entries:
+        target = re.search(r"^(?:  -|   ) buildTarget: (\S+)$", e, re.M)
+        if target and target.group(1) == DEFAULT_PLATFORM:
+            if seen_default:
+                continue
+            seen_default = True
+            # A missing key means compressed to Unity, so only an uncompressed choice is inserted.
+            e = _set_entry_key(e, "textureCompression", compression,
+                               insert_after="textureFormat" if compression == COMPRESSION_NONE else None)
+        e = _set_entry_key(e, "overridden", 0)
+        out.append(e)
+    if not seen_default:
+        raise KeyError(DEFAULT_PLATFORM)
+    return text[:m.start(1)] + "".join(out) + text[m.end(1):]
+
+
 _KEY_INDENT = {"textureType": "  ", "alphaIsTransparency": "  ", "sRGBTexture": "    "}
 
 
@@ -166,32 +240,46 @@ def sprite_texture_guids(project: Path) -> set[str]:
 def run(media: Path, project: Path, dry_run: bool = False) -> dict:
     by_name = collect(media)
     sprites = sprite_texture_guids(project)
-    report = {"textures": 0, "changed": 0, "normal_maps": 0, "linear": 0, "ambiguous": [], "unmatched": [],
-              "old_format": [], "changed_files": []}
+    report = {"textures": 0, "changed": 0, "normal_maps": 0, "linear": 0, "uncompressed": 0,
+              "duplicate_defaults_removed": 0, "ambiguous": [], "unmatched": [], "old_format": [],
+              "platform_unresolved": [], "changed_files": []}
     tex_dir = Path(project) / "Assets" / "Texture2D"
     for png in sorted(tex_dir.glob("*.png")):
         meta_path = png.with_name(png.name + ".meta")
         if not meta_path.is_file():
             continue
         report["textures"] += 1
-        found = candidates(png.stem, png_size(png), by_name)
-        if not found:
-            report["unmatched"].append(png.name)
-            continue
         meta = meta_path.read_text()
         if not re.search(r"^    sRGBTexture: ", meta, re.M):
             report["old_format"].append(png.name)
             continue
-        guid = re.search(r"^guid: ([0-9a-f]+)", meta, re.M)
-        want = desired(found, is_sprite=bool(guid and guid.group(1) in sprites))
-        if want is None:
-            report["ambiguous"].append(png.name)
-            continue
-        if want.get("textureType") == TYPE_NORMAL:
-            report["normal_maps"] += 1
-        elif want["sRGBTexture"] == 0:
-            report["linear"] += 1
-        new = patch_meta(meta, want)
+        found = candidates(png.stem, png_size(png), by_name)
+        new = meta
+        if not found:
+            report["unmatched"].append(png.name)
+        else:
+            guid = re.search(r"^guid: ([0-9a-f]+)", meta, re.M)
+            want = desired(found, is_sprite=bool(guid and guid.group(1) in sprites))
+            if want is None:
+                report["ambiguous"].append(png.name)
+            else:
+                if want.get("textureType") == TYPE_NORMAL:
+                    report["normal_maps"] += 1
+                elif want["sRGBTexture"] == 0:
+                    report["linear"] += 1
+                new = patch_meta(new, want)
+        compression = compression_for(found, legacy_texture_format(meta))
+        if compression is None:
+            report["platform_unresolved"].append(png.name)
+        else:
+            try:
+                before = new.count(f"buildTarget: {DEFAULT_PLATFORM}")
+                new = normalize_platforms(new, compression)
+                report["duplicate_defaults_removed"] += before - new.count(f"buildTarget: {DEFAULT_PLATFORM}")
+                if compression == COMPRESSION_NONE:
+                    report["uncompressed"] += 1
+            except KeyError:
+                report["platform_unresolved"].append(png.name)
         if new != meta:
             report["changed"] += 1
             report["changed_files"].append(meta_path.relative_to(project).as_posix())
@@ -213,9 +301,11 @@ def main(argv: list[str] | None = None) -> int:
         a.json.write_text(json.dumps(report, indent=1))
     print(f"textures={report['textures']} changed={report['changed']} normal_maps={report['normal_maps']} "
           f"linear={report['linear']} ambiguous={len(report['ambiguous'])} unmatched={len(report['unmatched'])} "
-          f"old_format={len(report['old_format'])}"
+          f"old_format={len(report['old_format'])} uncompressed={report['uncompressed']} "
+          f"duplicate_defaults_removed={report['duplicate_defaults_removed']} "
+          f"platform_unresolved={len(report['platform_unresolved'])}"
           + (" (dry run)" if a.dry_run else ""))
-    for k in ("ambiguous", "unmatched", "old_format"):
+    for k in ("ambiguous", "unmatched", "old_format", "platform_unresolved"):
         if report[k]:
             print(f"{k}: {', '.join(report[k])}")
     return 0

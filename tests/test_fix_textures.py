@@ -158,6 +158,93 @@ class PatchMetaTests(unittest.TestCase):
             ft.patch_meta("TextureImporter:\n  textureType: 8\n", {"sRGBTexture": 0})
 
 
+def _platform(target, compression, overridden, size=2048):
+    return (f"  - serializedVersion: 4\n    buildTarget: {target}\n    maxTextureSize: {size}\n"
+            f"    resizeAlgorithm: 0\n    textureFormat: -1\n    textureCompression: {compression}\n"
+            f"    compressionQuality: 50\n    crunchedCompression: 0\n    allowsAlphaSplitting: 0\n"
+            f"    overridden: {overridden}\n    ignorePlatformSupport: 0\n")
+
+
+def upgraded_meta(guid="ab", legacy_format=3, first_compression=0):
+    """Unity 6 upgraded meta with the duplicate overridden DefaultTexturePlatform entry."""
+    head = META.split("  platformSettings:\n")[0].replace("  textureType: 8\n", f"  textureType: 8\n  textureFormat: {legacy_format}\n")
+    return (head.format(guid=guid) + "  platformSettings:\n"
+            + _platform("DefaultTexturePlatform", first_compression, 0)
+            + _platform("DefaultTexturePlatform", 1, 1)
+            + _platform("Standalone", first_compression, 0)
+            + _platform("WebGL", first_compression, 0)
+            + "  spriteSheet:\n    serializedVersion: 2\n    sprites: []\n")
+
+
+def platform_entries(text):
+    import re
+    block = text.split("  platformSettings:\n")[1].split("  spriteSheet:")[0]
+    return [(re.search(r"buildTarget: (\S+)", e).group(1), int(re.search(r"textureCompression: (\d+)", e).group(1)),
+             int(re.search(r"overridden: (\d+)", e).group(1)))
+            for e in block.split("  - ")[1:]]
+
+
+class CompressionTests(unittest.TestCase):
+    def info(self, fmt):
+        return ft.TexInfo("T", 4, 4, fmt, 1, 1, 1, 0, 0, 1)
+
+    def test_uncompressed_originals_stay_uncompressed(self):
+        for fmt in (1, 2, 3, 4, 5, 7, 13, 14, 17, 18, 20):
+            self.assertEqual(ft.compression_for([self.info(fmt)], None), 0, fmt)
+
+    def test_block_compressed_originals_stay_compressed(self):
+        for fmt in (10, 12, 24, 25, 26, 27, 28, 29):
+            self.assertEqual(ft.compression_for([self.info(fmt)], None), 1, fmt)
+
+    def test_mixed_candidates_use_legacy_format(self):
+        both = [self.info(1), self.info(12)]
+        self.assertEqual(ft.compression_for(both, 1), 0)
+        self.assertEqual(ft.compression_for(both, 12), 1)
+        self.assertIsNone(ft.compression_for(both, 3))
+        self.assertIsNone(ft.compression_for(both, None))
+
+    def test_unmatched_falls_back_to_legacy_format(self):
+        self.assertEqual(ft.compression_for([], 3), 0)
+        self.assertEqual(ft.compression_for([], 10), 1)
+        self.assertIsNone(ft.compression_for([], -1))
+        self.assertIsNone(ft.compression_for([], None))
+
+
+class NormalizePlatformTests(unittest.TestCase):
+    def test_drops_duplicate_default_and_sets_uncompressed(self):
+        out = ft.normalize_platforms(upgraded_meta(), 0)
+        self.assertEqual(platform_entries(out),
+                         [("DefaultTexturePlatform", 0, 0), ("Standalone", 0, 0), ("WebGL", 0, 0)])
+        self.assertEqual(out.count("buildTarget: DefaultTexturePlatform"), 1)
+        self.assertTrue(out.endswith("  spriteSheet:\n    serializedVersion: 2\n    sprites: []\n"))
+
+    def test_compressed_choice(self):
+        out = ft.normalize_platforms(upgraded_meta(legacy_format=10, first_compression=1), 1)
+        self.assertEqual(platform_entries(out)[0], ("DefaultTexturePlatform", 1, 0))
+        self.assertEqual(len(platform_entries(out)), 3)
+
+    def test_first_entry_corrected_when_upgrade_chose_wrong(self):
+        out = ft.normalize_platforms(upgraded_meta(first_compression=1), 0)
+        self.assertEqual(platform_entries(out)[0], ("DefaultTexturePlatform", 0, 0))
+
+    def test_overridden_platforms_are_cleared(self):
+        text = upgraded_meta().replace(_platform("WebGL", 0, 0), _platform("WebGL", 1, 1))
+        self.assertEqual(platform_entries(ft.normalize_platforms(text, 0))[-1], ("WebGL", 1, 0))
+
+    def test_inserts_missing_compression_only_when_uncompressed(self):
+        text = META.format(guid="ab")
+        self.assertEqual(ft.normalize_platforms(text, 1), text)
+        self.assertIn("    textureCompression: 0\n", ft.normalize_platforms(text, 0))
+
+    def test_idempotent(self):
+        once = ft.normalize_platforms(upgraded_meta(), 0)
+        self.assertEqual(ft.normalize_platforms(once, 0), once)
+
+    def test_missing_block_raises(self):
+        with self.assertRaises(KeyError):
+            ft.normalize_platforms("TextureImporter:\n  textureType: 0\n", 0)
+
+
 class RunTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -214,6 +301,23 @@ class RunTests(unittest.TestCase):
         report = ft.run(self.media, self.project, dry_run=True)
         self.assertEqual(report["changed"], 2)
         self.assertEqual(self.meta("Rock_Normal"), META.format(guid="a1"))
+
+    def test_run_normalises_platforms(self):
+        (self.media / "lut.assets").write_bytes(serialized_file([
+            (1, 28, texture_blob("Home_LUT", 16, 4, fmt=3, usage=0, color_space=0)),
+            (2, 28, texture_blob("Noise", 8, 8, fmt=12, usage=0, color_space=0)),
+        ]))
+        for stem, size, guid, legacy, first in [("Home_LUT", (16, 4), "b1", 3, 0), ("Noise", (8, 8), "b2", 12, 1)]:
+            (self.tex / f"{stem}.png").write_bytes(png_header(*size))
+            (self.tex / f"{stem}.png.meta").write_text(upgraded_meta(guid, legacy, first))
+        report = ft.run(self.media, self.project)
+        self.assertEqual(platform_entries(self.meta("Home_LUT"))[0], ("DefaultTexturePlatform", 0, 0))
+        self.assertEqual(platform_entries(self.meta("Noise"))[0], ("DefaultTexturePlatform", 1, 0))
+        self.assertEqual(len(platform_entries(self.meta("Noise"))), 3)
+        self.assertEqual(report["uncompressed"], 1)
+        self.assertEqual(report["duplicate_defaults_removed"], 2)
+        self.assertIn("Assets/Texture2D/Home_LUT.png.meta", report["changed_files"])
+        self.assertEqual(ft.run(self.media, self.project)["changed"], 0)
 
     def test_second_run_changes_nothing(self):
         ft.run(self.media, self.project)
