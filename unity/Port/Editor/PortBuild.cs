@@ -10,6 +10,10 @@
 //     them over the PS4 copies inside the built player (see BuildAssetBundles);
 //   * writes StreamingAssets/PortInputAxes.json, the InputManager axis table used by the
 //     PortDebug scripted-input shim to answer GetButton/GetAxis for injected keys.
+//   * checks that the converted audio (StreamingAssets/PortAudio) made it into the player and
+//     deletes any PS4 Wwise audio left there except Init.bnk (see CleanWwiseAudio).
+// Unity audio is off in the project settings (the original used Wwise), so it is switched on
+// for the duration of the build (see EnableAudio) and the setting is restored afterwards.
 // Any failure exits the editor with code 1. Log lines are prefixed with [PortBuild].
 
 using System;
@@ -141,15 +145,19 @@ public static class PortBuild
         // player quit with exit code 173 at startup. Off for this build only; the project setting
         // is put back afterwards so ProjectSettings.asset is left as it was.
         bool receipt = PlayerSettings.useMacAppStoreValidation;
+        AudioSettingsBackup audio = null;
         BuildReport report;
         try
         {
             PlayerSettings.useMacAppStoreValidation = false;
+            audio = EnableAudio();
             report = BuildPipeline.BuildPlayer(options);
         }
         finally
         {
             PlayerSettings.useMacAppStoreValidation = receipt;
+            if (audio != null)
+                audio.Restore();
         }
         BuildSummary s = report.summary;
         Log(string.Format("player result: {0}, {1} errors, {2} warnings, {3:F0} s, {4:F1} MB",
@@ -165,7 +173,104 @@ public static class PortBuild
 
         BuildAssetBundles(StreamingAssetsOf(app));
         WriteInputAxes(StreamingAssetsOf(app));
+        CheckPortAudio(StreamingAssetsOf(app));
+        CleanWwiseAudio(StreamingAssetsOf(app));
         Log("RESULT: Succeeded " + app);
+    }
+
+    const string k_AudioManager = "ProjectSettings/AudioManager.asset";
+    const int k_RealVoices = 128;
+    const int k_VirtualVoices = 512;
+
+    // The project's AudioManager has m_DisableAudio set and 32 real voices because the original
+    // game used Wwise. The player plays the converted audio through Unity, so audio is enabled
+    // with 128 real / 512 virtual voices for the build and the old values are put back after.
+    sealed class AudioSettingsBackup
+    {
+        public SerializedObject Settings;
+        public bool Disabled;
+        public int RealVoices, VirtualVoices;
+
+        public void Restore()
+        {
+            Settings.Update();
+            Settings.FindProperty("m_DisableAudio").boolValue = Disabled;
+            Settings.FindProperty("m_RealVoiceCount").intValue = RealVoices;
+            Settings.FindProperty("m_VirtualVoiceCount").intValue = VirtualVoices;
+            Settings.ApplyModifiedPropertiesWithoutUndo();
+        }
+    }
+
+    static AudioSettingsBackup EnableAudio()
+    {
+        UnityEngine.Object am = AssetDatabase.LoadAllAssetsAtPath(k_AudioManager).FirstOrDefault();
+        if (am == null)
+            Fail(k_AudioManager + " not loadable; Unity audio would stay disabled");
+        var so = new SerializedObject(am);
+        SerializedProperty disable = so.FindProperty("m_DisableAudio");
+        SerializedProperty real = so.FindProperty("m_RealVoiceCount");
+        SerializedProperty virt = so.FindProperty("m_VirtualVoiceCount");
+        if (disable == null || real == null || virt == null)
+            Fail(k_AudioManager + " has no m_DisableAudio / m_RealVoiceCount / m_VirtualVoiceCount");
+        var backup = new AudioSettingsBackup
+        {
+            Settings = so,
+            Disabled = disable.boolValue,
+            RealVoices = real.intValue,
+            VirtualVoices = virt.intValue,
+        };
+        disable.boolValue = false;
+        real.intValue = k_RealVoices;
+        virt.intValue = k_VirtualVoices;
+        so.ApplyModifiedPropertiesWithoutUndo();
+        Log("audio: Unity audio enabled for the build (real voices " + k_RealVoices + ")");
+        return backup;
+    }
+
+    static void CheckPortAudio(string streamingAssets)
+    {
+        string manifest = Path.Combine(streamingAssets, "PortAudio", "manifest.json");
+        if (File.Exists(manifest))
+            Log("audio: converted audio present: " + manifest);
+        else
+            Debug.LogWarning("[PortBuild] WARNING no converted audio in the player (" + manifest +
+                             " missing); run python3 -m pipeline.audio, the player will be silent");
+    }
+
+    // The PS4 Wwise banks and streamed media are useless to the port; only
+    // LocaleIndependent/Init.bnk is kept because AkBasePathGetter enables audio init only when it
+    // exists. The pipeline prunes them from the project, this catches anything left over.
+    static void CleanWwiseAudio(string streamingAssets)
+    {
+        string root = Path.Combine(streamingAssets, "Audio", "GeneratedSoundBanks", "PS4");
+        if (!Directory.Exists(root))
+        {
+            Log("audio: no PS4 Wwise audio in the player");
+            return;
+        }
+        string keep = Path.GetFullPath(Path.Combine(root, "LocaleIndependent", "Init.bnk"));
+        int files = 0;
+        long bytes = 0;
+        foreach (string f in Directory.GetFiles(root, "*", SearchOption.AllDirectories))
+        {
+            if (string.Equals(Path.GetFullPath(f), keep, StringComparison.Ordinal))
+                continue;
+            bytes += new FileInfo(f).Length;
+            File.Delete(f);
+            files++;
+        }
+        int dirs = 0;
+        foreach (string d in Directory.GetDirectories(root, "*", SearchOption.AllDirectories)
+                                      .OrderByDescending(d => d.Length))
+        {
+            if (!Directory.EnumerateFileSystemEntries(d).Any())
+            {
+                Directory.Delete(d);
+                dirs++;
+            }
+        }
+        Log(string.Format("audio: removed {0} leftover PS4 audio files ({1:F1} MB) and {2} empty folders; Init.bnk {3}",
+                          files, bytes / 1048576.0, dirs, File.Exists(keep) ? "kept" : "MISSING"));
     }
 
     // Rebuild every AssetBundle defined by asset labels in the project for the Mac target into the

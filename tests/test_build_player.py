@@ -96,5 +96,32 @@ class LockTests(unittest.TestCase):
                                 "-logFile", "/w/reports/build-mac.log"])
 
 
+class InstallAudioTests(unittest.TestCase):
+    def test_installs_when_staged_audio_exists(self):
+        with tempfile.TemporaryDirectory() as t:
+            work = Path(t)
+            (work / "audio/PortAudio").mkdir(parents=True)
+            (work / "audio/PortAudio/manifest.json").write_text("{}")
+            calls, logs = [], []
+
+            def install(staged, project):
+                calls.append((staged, project))
+                return {"copied": 2, "unchanged": 5, "deleted": 0, "pruned": 0}
+
+            r = build_player.install_audio(work, work / "project", install=install, log=logs.append)
+            self.assertEqual(calls, [(work / "audio/PortAudio", work / "project")])
+            self.assertEqual(r["copied"], 2)
+            self.assertIn("2 copied", logs[0])
+
+    def test_warns_and_continues_without_staged_audio(self):
+        with tempfile.TemporaryDirectory() as t:
+            logs = []
+            r = build_player.install_audio(Path(t), Path(t) / "project",
+                                           install=lambda *a: self.fail("must not install"), log=logs.append)
+            self.assertIsNone(r)
+            self.assertEqual(logs, ["audio: no converted audio (run python3 -m pipeline.audio); "
+                                    "the player will be silent"])
+
+
 if __name__ == "__main__":
     unittest.main()

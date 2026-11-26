@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from pipeline import build_all
 
@@ -139,6 +140,46 @@ class UnityEditorCheckTests(unittest.TestCase):
             exe.write_text("#!/bin/sh\n")
             exe.chmod(0o755)
             build_all.check_unity_editor(exe)
+
+
+class BuildProjectTests(unittest.TestCase):
+    """Audio is converted and installed after the project is prepared and before Unity imports it."""
+
+    def test_audio_runs_between_prepare_and_import(self):
+        calls = []
+        c = SimpleNamespace(work_dir=Path("/w"), unity_editor=Path("/u/Unity"))
+
+        def prepare(pristine, project, patch_dir):
+            calls.append(("prepare", pristine, project))
+            return False
+
+        def audio_build(work_dir, project):
+            calls.append(("audio", work_dir, project))
+
+        def import_(editor, project, media, reports):
+            calls.append(("import", editor, project, media, reports))
+            return 7
+
+        rc = build_all.build_project(c, Path("/w/export"), Path("/w/project"), prepare=prepare,
+                                     audio_build=audio_build, import_=import_, log=lambda *a: None)
+        self.assertEqual(rc, 7)
+        self.assertEqual([x[0] for x in calls], ["prepare", "audio", "import"])
+        self.assertEqual(calls[1], ("audio", Path("/w"), Path("/w/project")))
+        self.assertEqual(calls[2], ("import", Path("/u/Unity"), Path("/w/project"), Path("/w/merged/Media"),
+                                    Path("/w/reports")))
+
+    def test_audio_failure_stops_before_import(self):
+        calls = []
+        c = SimpleNamespace(work_dir=Path("/w"), unity_editor=Path("/u/Unity"))
+
+        def audio_build(work_dir, project):
+            raise RuntimeError("converter broke")
+
+        with self.assertRaises(RuntimeError):
+            build_all.build_project(c, Path("/p"), Path("/w/project"), prepare=lambda *a: True,
+                                    audio_build=audio_build, import_=lambda *a: calls.append("import") or 0,
+                                    log=lambda *a: None)
+        self.assertEqual(calls, [])
 
 
 if __name__ == "__main__":

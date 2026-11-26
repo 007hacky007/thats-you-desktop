@@ -1,6 +1,6 @@
 """Build the macOS player (work/builds/mac/ThatsYou.app) with Unity in batch mode.
 
-Syncs unity/Port into the project first, refuses to start while another Unity has the project
+Syncs unity/Port and the converted audio (work/audio/PortAudio) into the project first, refuses to start while another Unity has the project
 open, runs PortBuild.BuildMac and prints a short summary of the build log.
 
 CLI: python3 -m pipeline.build_player [--project DIR] [--log FILE]
@@ -97,6 +97,25 @@ def format_summary(s: dict, rc: int, top: int = 15) -> str:
     return "\n".join(lines)
 
 
+NO_AUDIO = "audio: no converted audio (run python3 -m pipeline.audio); the player will be silent"
+
+
+def install_audio(work_dir: Path, project: Path, install=None, log=print) -> dict | None:
+    """Install the staged PortAudio data into the project (cheap and idempotent), or warn when
+    there is none. Returns the install counts, or None when nothing was staged."""
+    staged = Path(work_dir) / "audio" / "PortAudio"
+    if not (staged / "manifest.json").is_file():
+        log(NO_AUDIO)
+        return None
+    if install is None:
+        from pipeline import audio_install
+        install = audio_install.install
+    r = install(staged, project)
+    log(f"audio: {r.get('copied', 0)} copied, {r.get('unchanged', 0)} unchanged, {r.get('deleted', 0)} stale "
+        f"deleted, {r.get('pruned', 0)} PS4 audio files pruned")
+    return r
+
+
 def main(argv: list[str] | None = None) -> int:
     from pipeline import build_all, config
 
@@ -113,6 +132,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"refusing to build: {project} is open in Unity (pid {', '.join(map(str, holders))})", file=sys.stderr)
         return 2
     build_all.sync_port(build_all.PORT_DIR, project)
+    install_audio(c.work_dir, project)
     log.parent.mkdir(parents=True, exist_ok=True)
     if log.exists():
         log.unlink()

@@ -1,5 +1,5 @@
-"""Run the whole pipeline: merge -> extract game -> extract app -> project -> patches -> Unity import
--> texture import fix -> Unity reimport -> report."""
+"""Run the whole pipeline: merge -> extract game -> extract app -> project -> patches -> audio
+-> Unity import -> texture import fix -> Unity reimport -> report."""
 from __future__ import annotations
 
 import hashlib
@@ -8,7 +8,7 @@ import os
 import shutil
 from pathlib import Path
 
-from pipeline import compile_report, config, extract_app, extract_game, fix_textures, merge, patches, unity
+from pipeline import audio, compile_report, config, extract_app, extract_game, fix_textures, merge, patches, unity
 from pipeline.csc_check import PORT_DIR
 from pipeline.merge import _place_file
 
@@ -117,6 +117,16 @@ def import_project(editor: Path, project: Path, media: Path, reports: Path,
     return rc
 
 
+def build_project(c: config.Config, pristine: Path, project: Path, *, prepare=prepare_project,
+                  audio_build=None, import_=import_project, log=print) -> int:
+    """prepare the project -> convert and install the audio -> Unity import. The audio goes in
+    before the import so Unity imports the PortAudio files once. Returns the Unity exit code."""
+    w = c.work_dir
+    log("project rebuilt:", prepare(pristine, project, patches.PATCH_DIR))
+    (audio_build or audio.build)(w, project)
+    return import_(c.unity_editor, project, w / "merged" / "Media", w / "reports")
+
+
 def main() -> None:
     c = config.load()
     check_unity_editor(c.unity_editor)
@@ -126,9 +136,8 @@ def main() -> None:
     extract_app.main()
     pristine = w / "export" / "game" / "ExportedProject"
     project = w / "project"
-    print("project rebuilt:", prepare_project(pristine, project, patches.PATCH_DIR))
     log = w / "reports" / "unity-import.log"
-    rc = import_project(c.unity_editor, project, w / "merged" / "Media", w / "reports")
+    rc = build_project(c, pristine, project)
     report = compile_report.parse(log, exit_code=rc)
     compile_report.write(report, w / "reports")
     print(f"unity exit {rc}; {report.total} compile errors; report: {w / 'reports' / 'compile.md'}")
