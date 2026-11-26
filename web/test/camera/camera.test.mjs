@@ -246,3 +246,77 @@ test('stopNow while a start is in flight leaves the camera stopped', async () =>
   assert.equal(cam.active, false);
   assert.ok(devices.tracks.every((t) => t.stopped));
 });
+
+// getUserMedia that waits until the test opens the gate
+function gatedSetup(opts = {}) {
+  const s = setup(opts);
+  const real = s.devices.getUserMedia.bind(s.devices);
+  let open = null;
+  s.gate = () => new Promise((r) => { open = r; });
+  s.devices.getUserMedia = async (c) => {
+    if (s.hold) await s.hold;
+    return real(c);
+  };
+  s.hold = null;
+  s.block = () => { s.hold = s.gate(); };
+  s.unblock = () => { const o = open; s.hold = null; o(); };
+  return s;
+}
+
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
+test('release during a pending start still releases after 10 s', async () => {
+  const s = gatedSetup();
+  s.block();
+  const p = s.cam.start('user');
+  await flush();
+  s.cam.release();
+  assert.equal(s.clock.pending(), 1);
+  s.unblock();
+  await p;
+  assert.equal(s.cam.active, true);
+  s.clock.advance(RELEASE_MS);
+  assert.equal(s.cam.active, false);
+  assert.ok(s.devices.tracks.every((t) => t.stopped));
+});
+
+test('release timer firing before a pending start resolves stops the late stream', async () => {
+  const s = gatedSetup();
+  s.block();
+  const p = s.cam.start('user');
+  await flush();
+  s.cam.release();
+  s.clock.advance(RELEASE_MS);
+  s.unblock();
+  await assert.rejects(p, (e) => e.name === 'AbortError');
+  assert.equal(s.cam.active, false);
+  assert.equal(s.devices.tracks.length, 1);
+  assert.ok(s.devices.tracks.every((t) => t.stopped));
+});
+
+test('release during a pending flip releases the new stream', async () => {
+  const s = gatedSetup({ inputs: 2 });
+  await s.cam.start('user');
+  s.block();
+  const p = s.cam.flip();
+  await flush();
+  s.cam.release();
+  assert.equal(s.clock.pending(), 1);
+  s.unblock();
+  await p;
+  assert.equal(s.cam.facing, 'environment');
+  assert.equal(s.cam.active, true);
+  s.clock.advance(RELEASE_MS);
+  assert.equal(s.cam.active, false);
+  assert.ok(s.devices.tracks.every((t) => t.stopped));
+});
+
+test('release with nothing open or pending schedules nothing', async () => {
+  const s = setup();
+  s.cam.release();
+  assert.equal(s.clock.pending(), 0);
+  await s.cam.start('user');
+  s.cam.stopNow();
+  s.cam.release();
+  assert.equal(s.clock.pending(), 0);
+});

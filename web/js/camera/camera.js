@@ -44,6 +44,7 @@ export function createCamera({
   let releaseTimer = null;
   let gen = 0; // bumped by stopNow so in-flight starts give up
   let chain = Promise.resolve();
+  let inFlight = 0; // start/flip calls not settled yet
 
   function ensureVideo() {
     if (video || !document) return video;
@@ -132,8 +133,10 @@ export function createCamera({
   }
 
   function enqueue(fn) {
+    inFlight++;
     const p = chain.then(fn, fn);
-    chain = p.catch(() => {});
+    const settled = () => { inFlight--; };
+    chain = p.then(settled, settled);
     return p;
   }
 
@@ -158,9 +161,11 @@ export function createCamera({
       return enqueue(() => doStart(facing === 'user' ? 'environment' : 'user', g));
     },
 
+    // Also covers a start/flip still in flight (e.g. permission prompt up):
+    // the timer bumps gen, so a stream that arrives later is stopped at once.
     release() {
       cancelRelease();
-      if (!active) return;
+      if (!active && inFlight === 0) return;
       releaseTimer = clock.setTimeout(() => {
         releaseTimer = null;
         gen++;
