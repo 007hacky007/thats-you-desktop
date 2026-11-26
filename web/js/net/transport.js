@@ -69,6 +69,8 @@ export function createRtcTransport(params, { log = nullLog } = {}) {
         resolve();
       };
     });
+    // close() may reject it while the offer is still being made, before it is awaited below
+    openPromise.catch(() => {});
     dc.onclose = () => lost('channel closed');
     dc.onerror = (e) => log.warn('channel error: ' + ((e && e.error && e.error.message) || 'unknown'));
     dc.onmessage = (e) => {
