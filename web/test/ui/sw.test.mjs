@@ -8,10 +8,10 @@ const SCOPE = 'http://127.0.0.1:8088/iwyk/';
 const V1 = '0123456789abcdef';
 const V2 = 'fedcba9876543210';
 
-function makeResponse(body, status = 200) {
+function makeResponse(body, status = 200, redirected = false) {
   return {
-    ok: status >= 200 && status < 300, status, type: 'basic', body,
-    clone() { return makeResponse(body, status); },
+    ok: status >= 200 && status < 300, status, type: 'basic', body, redirected, statusText: '', headers: {},
+    clone() { return makeResponse(body, status, redirected); },
     async json() { return typeof body === 'string' ? JSON.parse(body) : body; },
   };
 }
@@ -47,9 +47,12 @@ function makeEnv(files) {
     if (env.offline) throw new TypeError('offline');
     const rel = url.startsWith(SCOPE) ? url.slice(SCOPE.length) : url;
     if (!(rel in env.files)) return makeResponse('', 404);
-    return makeResponse(env.files[rel]);
+    return makeResponse(env.files[rel], 200, (env.redirects || []).includes(rel));
   };
-  const context = vm.createContext({ self, caches, fetch, URL, console, Promise, Date });
+  class Response {
+    constructor(body, init = {}) { Object.assign(this, makeResponse(body, init.status || 200)); this.statusText = init.statusText || ''; this.headers = init.headers || {}; }
+  }
+  const context = vm.createContext({ self, caches, fetch, URL, console, Promise, Date, Response });
   vm.runInContext(SOURCE, context, { filename: 'sw.js' });
   async function dispatch(type, extra = {}) {
     let p = null;
@@ -165,4 +168,18 @@ test('foreign origins, non-GET, sw.js and precache.json are not intercepted', as
   assert.equal(await dispatch('fetch', { request: req('x', 'cors', 'POST') }), null);
   assert.equal(await dispatch('fetch', { request: req('sw.js') }), null);
   assert.equal(await dispatch('fetch', { request: req('precache.json') }), null);
+});
+
+test('redirected responses are never cached or served as is (Cloudflare redirects /index.html to /)', async () => {
+  const files = { 'precache.json': { version: V1, files: ['index.html', 'js/main.js'] }, 'index.html': 'INDEX', 'js/main.js': 'MAIN' };
+  const { env, store, dispatch, req } = makeEnv(files);
+  env.redirects = ['index.html'];
+  await dispatch('install');
+  await dispatch('activate');
+  assert.equal(store.get(`iwyk-${V1}`).get(`${SCOPE}index.html`).redirected, false);
+  // an old cache that still holds a redirected entry is cleaned when served
+  store.get(`iwyk-${V1}`).set(`${SCOPE}index.html`, makeResponse('OLD', 200, true));
+  const res = await dispatch('fetch', { request: req('', 'navigate') });
+  assert.equal(res.redirected, false);
+  assert.equal(res.body, 'OLD');
 });

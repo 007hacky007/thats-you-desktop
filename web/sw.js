@@ -46,6 +46,13 @@ function pickCurrent(names) {
   return v.length ? v[v.length - 1] : null;
 }
 
+// Browsers refuse a redirected response as the answer to a navigation (ERR_FAILED), and
+// static hosts redirect /index.html to / (Cloudflare does). Copy such responses.
+function clean(res) {
+  if (!res || !res.redirected) return res;
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: res.headers });
+}
+
 function scopeUrl(path) {
   return new URL(path, self.registration.scope).href;
 }
@@ -72,7 +79,7 @@ async function fillCache(pc) {
       const url = scopeUrl(f);
       const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error(`precache ${f}: ${res.status}`);
-      await cache.put(url, res);
+      await cache.put(url, clean(res));
     }));
   } catch (e) {
     await caches.delete(name);
@@ -110,7 +117,7 @@ function checkForUpdate(now) {
 
 async function fromCache(name, request) {
   const cache = await caches.open(name);
-  return cache.match(request);
+  return clean(await cache.match(request));
 }
 
 async function handle(request, event) {
@@ -130,9 +137,9 @@ async function handle(request, event) {
       const res = await fetch(request);
       if (res && res.status === 200 && res.type === 'basic' && !isNav) {
         const cache = await caches.open(name);
-        await cache.put(request, res.clone());
+        await cache.put(request, clean(res.clone()));
       }
-      return res;
+      return isNav ? clean(res) : res;
     } catch (e) {
       if (isNav) {
         const idx = await fromCache(name, scopeUrl('index.html'));
@@ -146,9 +153,9 @@ async function handle(request, event) {
     const res = await fetch(request);
     if (res && res.status === 200 && res.type === 'basic') {
       const cache = await caches.open(RUNTIME_CACHE);
-      await cache.put(request, res.clone());
+      await cache.put(request, clean(res.clone()));
     }
-    return res;
+    return isNav ? clean(res) : res;
   } catch (e) {
     const hit = await fromCache(RUNTIME_CACHE, request);
     if (hit) return hit;
