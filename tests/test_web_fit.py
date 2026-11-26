@@ -18,6 +18,10 @@ class JudgeTest(unittest.TestCase):
         self.assertEqual(judge({"rotate": True}, landscape=True), [])
         self.assertTrue(judge({"rotate": False}, landscape=True))
 
+    def test_keyboard_open_must_not_show_rotate_hint(self):
+        self.assertTrue(judge({"rotate": True}, keyboard=True))
+        self.assertEqual(judge({"rotate": False, "docScroll": [0, 99]}, keyboard=True), [])
+
     def test_rotate_hint_in_portrait_fails(self):
         self.assertTrue(judge({"docScroll": [0, 0], "rotate": True}))
 

@@ -179,11 +179,10 @@ body.art .card-panel .counter { color: #4a4a4a; font-weight: 700; }
 
 /* Portrait only, like the original app: phones held sideways get a hint. */
 .rotate-hint { display: none; }
-@media (orientation: landscape) and (max-height: 520px) {
-  .rotate-hint {
+body.landscape-device .rotate-hint {
     display: flex; position: fixed; inset: 0; z-index: 1000; align-items: center; justify-content: center;
     flex-direction: column; gap: 16px; background: var(--bg); color: var(--fg); text-align: center; padding: 24px;
     font-family: var(--font-heading); font-size: 1.4rem;
-  }
-  .rotate-hint .rotate-phone { width: 48px; height: 80px; border: 4px solid currentColor; border-radius: 10px; transform: rotate(-90deg); }
 }
+.rotate-hint .rotate-phone { width: 48px; height: 80px; border: 4px solid currentColor; border-radius: 10px; animation: rotate-upright 1.6s ease-in-out infinite alternate; }
+@keyframes rotate-upright { from { transform: rotate(-90deg); } to { transform: rotate(0deg); } }

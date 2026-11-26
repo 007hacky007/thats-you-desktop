@@ -13,12 +13,42 @@ export function fitStyle(scale, natural) {
   return { transform: `scale(${scale})`, height: `${Math.ceil(natural)}px`, flex: 'none' };
 }
 
+// True when a phone is held sideways. Uses the device orientation, never the viewport shape:
+// an open on-screen keyboard makes the viewport wider than tall in portrait.
+export function isLandscapeDevice({ orientationType, windowOrientation, screenW, screenH, coarse }) {
+  if (!coarse) return false;
+  if (Math.min(screenW || 0, screenH || 0) >= 600) return false; // tablet
+  if (typeof orientationType === 'string' && orientationType) return orientationType.startsWith('landscape');
+  if (typeof windowOrientation === 'number') return Math.abs(windowOrientation) === 90;
+  return (screenW || 0) > (screenH || 0);
+}
+
+export function typing(doc) {
+  const el = doc && doc.activeElement;
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true);
+}
+
+function readOrientation(win) {
+  const scr = win.screen || {};
+  return {
+    orientationType: scr.orientation && scr.orientation.type,
+    windowOrientation: typeof win.orientation === 'number' ? win.orientation : undefined,
+    screenW: scr.width, screenH: scr.height,
+    coarse: !!(win.matchMedia && win.matchMedia('(pointer: coarse)').matches),
+  };
+}
+
 // Keeps host's current screen element scaled to fit. Returns { refit, stop }.
 export function attachFit(host, win = globalThis) {
   let queued = false;
   const raf = win.requestAnimationFrame ? (f) => win.requestAnimationFrame(f) : (f) => setTimeout(f, 16);
   function apply() {
     queued = false;
+    const doc = win.document;
+    if (doc && doc.body && doc.body.classList) {
+      doc.body.classList.toggle('landscape-device', isLandscapeDevice(readOrientation(win)));
+    }
+    if (typing(doc)) return; // the keyboard shrinks the viewport; keep the layout as it was
     const el = host.firstElementChild;
     if (!el || !el.style) return;
     Object.assign(el.style, fitStyle(1));
@@ -35,7 +65,13 @@ export function attachFit(host, win = globalThis) {
   const offs = [];
   if (win.addEventListener) {
     win.addEventListener('resize', refit);
+    win.addEventListener('orientationchange', refit);
     offs.push(() => win.removeEventListener('resize', refit));
+    offs.push(() => win.removeEventListener('orientationchange', refit));
+    if (win.document && win.document.addEventListener) {
+      win.document.addEventListener('focusout', refit); // keyboard closed
+      offs.push(() => win.document.removeEventListener('focusout', refit));
+    }
   }
   if (host.addEventListener) {
     host.addEventListener('load', refit, true); // images

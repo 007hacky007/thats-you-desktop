@@ -200,3 +200,24 @@ test('app keys in en.js exist in the extracted localisation (skipped without the
     assert.ok(keys.has(k), `unknown app key ${k}`);
   }
 });
+
+test('our own port texts are translated for Czech, English stays the last fallback', async () => {
+  const { PORT_TEXTS } = await import('../../js/i18n/port-texts.js');
+  const fetch = fakeFetch({
+    'i18n/index.json': { default: 'en', languages: { en: 'i18n/en.json', cs: 'i18n/cs.json' } },
+    'i18n/cs.json': { PausedTitle: 'PAUZA' },
+  });
+  const i18n = await loadI18n({ languages: ['cs-CZ'], fetch, locale: 'cs-CZ' });
+  assert.equal(i18n.lang, 'cs');
+  assert.equal(i18n.t('port.rotate'), PORT_TEXTS.cs['port.rotate']);
+  assert.notEqual(i18n.t('port.rotate'), EN['port.rotate']);
+  assert.equal(i18n.t('port.debugLog'), EN['port.debugLog']);
+});
+
+test('every Czech port text has an English original with the same placeholders', async () => {
+  const { PORT_TEXTS } = await import('../../js/i18n/port-texts.js');
+  for (const [k, v] of Object.entries(PORT_TEXTS.cs)) {
+    assert.ok(k in EN, k);
+    assert.deepEqual(v.match(/\{\d\}/g) || [], EN[k].match(/\{\d\}/g) || [], k);
+  }
+});

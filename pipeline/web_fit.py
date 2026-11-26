@@ -20,6 +20,7 @@ from pipeline import web_common, web_e2e, web_serve
 
 VIEWPORTS = [(375, 667), (430, 932), (360, 800)]
 LANDSCAPE = (844, 390)
+KEYBOARD = (390, 320)  # portrait phone with the on-screen keyboard open
 
 METRICS_JS = r"""(() => {
   const W = innerWidth, H = innerHeight, se = document.scrollingElement;
@@ -49,8 +50,10 @@ METRICS_JS = r"""(() => {
 LINKS_JS = """[...document.querySelectorAll('a[href^="#demo="]')].map(a => a.getAttribute('href'))"""
 
 
-def judge(m: dict, landscape: bool = False) -> list[str]:
+def judge(m: dict, landscape: bool = False, keyboard: bool = False) -> list[str]:
     """Problems found in one METRICS_JS result."""
+    if keyboard:
+        return ["rotate hint shown while the keyboard is open in portrait"] if m.get("rotate") else []
     if landscape:
         return [] if m.get("rotate") else ["landscape shows no rotate hint"]
     probs = []
@@ -82,17 +85,21 @@ def main(argv=None) -> int:
         page.navigate(base + "#demo")
         time.sleep(1.0)
         links = [h for h in page.evaluate(LINKS_JS) if not a.only or a.only in h]
-        for w, h in VIEWPORTS + [LANDSCAPE]:
-            land = (w, h) == LANDSCAPE
+        page.s.send("Emulation.setTouchEmulationEnabled", {"enabled": True, "maxTouchPoints": 5})
+        page.s.send("Emulation.setEmitTouchEventsForMouse", {"enabled": True})
+        for w, h in VIEWPORTS + [LANDSCAPE, KEYBOARD]:
+            land, kb = (w, h) == LANDSCAPE, (w, h) == KEYBOARD
+            sw, sh = (max(w, h), min(w, h)) if land else (390, 844) if kb else (w, h)
             page.s.send("Emulation.setDeviceMetricsOverride",
                         {"width": w, "height": h, "deviceScaleFactor": 2, "mobile": True,
+                         "screenWidth": sw, "screenHeight": sh,
                          "screenOrientation": {"type": "landscapePrimary" if land else "portraitPrimary",
                                                "angle": 90 if land else 0}})
-            for link in (links[:1] if land else links):
+            for link in (links[:1] if land or kb else links):
                 page.navigate(base + link)
                 time.sleep(0.6)
                 m = page.evaluate(METRICS_JS)
-                probs = judge(m, land)
+                probs = judge(m, land, kb)
                 tag = link[len("#demo="):].replace(":", "_").replace("&overlay=", "+")
                 shot = out_dir / f"{w}x{h}" / f"{tag}.png"
                 page.screenshot(shot)

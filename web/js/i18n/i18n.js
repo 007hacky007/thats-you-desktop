@@ -3,6 +3,7 @@
 // our built-in English wording from en.js.
 
 import { EN } from './en.js';
+import { PORT_TEXTS } from './port-texts.js';
 
 const RTL = new Set(['ar']);
 
@@ -84,7 +85,7 @@ export async function loadI18n({ languages, fetch: fetchFn, locale, base = '' } 
       }
     }
   }
-  const fallbacks = [EN];
+  const fallbacks = PORT_TEXTS[lang] ? [PORT_TEXTS[lang], EN] : [EN];
   const lookup = (key) => {
     if (table && typeof table[key] === 'string') return table[key];
     for (const fb of fallbacks) if (typeof fb[key] === 'string') return fb[key];

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fitScale, fitStyle } from '../../js/ui/fit.js';
+import { fitScale, fitStyle, isLandscapeDevice, typing } from '../../js/ui/fit.js';
 import { EN } from '../../js/i18n/en.js';
 import { readFileSync } from 'node:fs';
 
@@ -34,5 +34,25 @@ test('fit style keeps the visual height equal to the available height', () => {
 test('rotate hint has an English text and a landscape rule', () => {
   assert.ok(EN['port.rotate']);
   const css = readFileSync(new URL('../../css/screens.css', import.meta.url), 'utf8');
-  assert.match(css, /orientation:\s*landscape[^{]*\{[^}]*\.rotate-hint/);
+  assert.match(css, /body\.landscape-device \.rotate-hint/);
+});
+
+test('landscape comes from the device orientation, not the viewport shape', () => {
+  // keyboard open in portrait: viewport is wide, device is upright
+  assert.equal(isLandscapeDevice({ orientationType: 'portrait-primary', coarse: true, screenW: 390, screenH: 844 }), false);
+  assert.equal(isLandscapeDevice({ orientationType: 'landscape-primary', coarse: true, screenW: 844, screenH: 390 }), true);
+  assert.equal(isLandscapeDevice({ windowOrientation: 90, coarse: true, screenW: 390, screenH: 844 }), true);
+  assert.equal(isLandscapeDevice({ windowOrientation: 0, coarse: true, screenW: 390, screenH: 844 }), false);
+});
+
+test('desktops and tablets never get the rotate hint', () => {
+  assert.equal(isLandscapeDevice({ orientationType: 'landscape-primary', coarse: false, screenW: 1920, screenH: 1080 }), false);
+  assert.equal(isLandscapeDevice({ orientationType: 'landscape-primary', coarse: true, screenW: 1366, screenH: 1024 }), false);
+});
+
+test('no refit while typing', () => {
+  assert.equal(typing({ activeElement: { tagName: 'INPUT' } }), true);
+  assert.equal(typing({ activeElement: { tagName: 'TEXTAREA' } }), true);
+  assert.equal(typing({ activeElement: { tagName: 'BODY' } }), false);
+  assert.equal(typing({}), false);
 });
