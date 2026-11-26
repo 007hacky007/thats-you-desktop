@@ -6,7 +6,14 @@
 //   They are reference counted per owner and destroyed when the last owner and voice let go.
 // - Language media and external voice load on demand (or through Prefetch) into an LRU that is
 //   trimmed to StreamBudgetMb; clips in use by a voice are never evicted.
-// - At most MaxConcurrentLoads requests run at once; voice requests go before preloads.
+// - At most MaxConcurrentLoads requests run at once; voice requests (urgent: Acquire, Prefetch,
+//   or a queued preload a voice now needs) go before preloads.
+// - Preloads are background work: at most MaxPreloadLoads run at once and at most
+//   MaxPreloadStartsPerTick start per Tick. While a scene loads (the game raises
+//   Application.backgroundLoadingPriority to High for that and lowers it when done) no new
+//   preload starts at all, so the boot preloads do not slow the Home scene load. Running
+//   requests still finish. The gate gives up after MaxGateSec in one stretch, in case the
+//   priority is never lowered.
 // Main thread only.
 
 using System;
@@ -33,9 +40,14 @@ namespace PortAudio.Unity
             public long LastUse;
             public long Bytes;
             public bool Urgent;
+            public bool Background;             // started as a preload (counts against MaxPreloadLoads)
             public UnityWebRequest Request;
             public bool Finished { get { return State == LoadState.Ready || State == LoadState.Failed; } }
         }
+
+        public const int MaxPreloadLoads = 4;
+        public const int MaxPreloadStartsPerTick = 2;
+        public const double MaxGateSec = 30.0;
 
         readonly Dictionary<string, Entry> entries = new Dictionary<string, Entry>(StringComparer.Ordinal);
         readonly List<Entry> queue = new List<Entry>();
@@ -43,6 +55,9 @@ namespace PortAudio.Unity
         readonly int maxLoads;
         readonly long budgetBytes;
         long useCounter;
+        int backgroundLoads;
+        double gateSince = double.NaN;
+        bool gateExpired;
 
         public PaClipCache(PaMixerConfig config)
         {
@@ -53,6 +68,10 @@ namespace PortAudio.Unity
 
         public int LoadedCount { get; private set; }
         public int LoadingCount { get { return loading.Count + queue.Count; } }
+        public int QueuedCount { get { return queue.Count; } }
+        public int InFlightCount { get { return loading.Count; } }
+        /// <summary>True while new preloads are held back because a scene load is running.</summary>
+        public bool Gated { get; private set; }
         /// <summary>Bytes held by on-demand (not bank-owned) clips.</summary>
         public long StreamBytes { get; private set; }
 
@@ -157,20 +176,20 @@ namespace PortAudio.Unity
                 var e = loading[i];
                 if (e.State == LoadState.Loading)
                 {
-                    if (e.Request == null) { Fail(e, "request lost"); loading.RemoveAt(i); continue; }
+                    if (e.Request == null) { Fail(e, "request lost"); RemoveLoading(i); continue; }
                     if (!e.Request.isDone) continue;
                     if (e.Request.result != UnityWebRequest.Result.Success)
                     {
                         Fail(e, e.Request.error ?? "load failed");
                         DisposeRequest(e);
-                        loading.RemoveAt(i);
+                        RemoveLoading(i);
                         continue;
                     }
                     AudioClip clip = null;
                     try { clip = DownloadHandlerAudioClip.GetContent(e.Request); }
                     catch (Exception ex) { Fail(e, ex.Message); }
                     DisposeRequest(e);
-                    if (clip == null) { if (e.State != LoadState.Failed) Fail(e, "no clip"); loading.RemoveAt(i); continue; }
+                    if (clip == null) { if (e.State != LoadState.Failed) Fail(e, "no clip"); RemoveLoading(i); continue; }
                     clip.name = "pa:" + (e.Media.Label ?? e.Media.Id.ToString());
                     e.Clip = clip;
                     e.State = LoadState.Decoding;
@@ -181,28 +200,66 @@ namespace PortAudio.Unity
                     var ls = e.Clip == null ? AudioDataLoadState.Failed : e.Clip.loadState;
                     if (ls == AudioDataLoadState.Loading) continue;
                     if (ls == AudioDataLoadState.Unloaded) { e.Clip.LoadAudioData(); continue; }
-                    loading.RemoveAt(i);
+                    RemoveLoading(i);
                     if (ls == AudioDataLoadState.Failed) { DestroyClip(e); Fail(e, "decode failed"); continue; }
                     e.State = LoadState.Ready;
                     LoadedCount++;
                 }
             }
 
-            // start queued requests, voices first
+            // start queued requests: voices first, then a few preloads unless a scene is loading
+            Gated = SceneLoading();
             if (queue.Count > 0 && loading.Count < maxLoads)
             {
                 queue.Sort((a, b) => a.Urgent != b.Urgent ? (a.Urgent ? -1 : 1) : a.LastUse.CompareTo(b.LastUse));
-                int n = 0;
-                while (n < queue.Count && loading.Count < maxLoads)
+                int backgroundStarts = 0;
+                while (queue.Count > 0 && loading.Count < maxLoads)
                 {
-                    var e = queue[n];
-                    queue.RemoveAt(n);
+                    var e = queue[0];
+                    if (e.State == LoadState.Queued && !e.Urgent)
+                    {
+                        // sorted: everything from here on is a preload
+                        if (Gated || backgroundLoads >= MaxPreloadLoads || backgroundStarts >= MaxPreloadStartsPerTick) break;
+                        backgroundStarts++;
+                    }
+                    queue.RemoveAt(0);
                     if (e.State != LoadState.Queued) continue;
                     Start(e);
                 }
             }
 
             Trim();
+        }
+
+        void RemoveLoading(int i)
+        {
+            var e = loading[i];
+            loading.RemoveAt(i);
+            if (e.Background) { e.Background = false; backgroundLoads = Math.Max(0, backgroundLoads - 1); }
+        }
+
+        void Untrack(Entry e)
+        {
+            int i = loading.IndexOf(e);
+            if (i >= 0) RemoveLoading(i);
+        }
+
+        /// <summary>The game's scene-load signal, with a time limit (see the file header).</summary>
+        bool SceneLoading()
+        {
+            bool high;
+            try { high = Application.backgroundLoadingPriority == ThreadPriority.High; }
+            catch (Exception) { high = false; }
+            if (!high) { gateSince = double.NaN; gateExpired = false; return false; }
+            double now = Time.realtimeSinceStartupAsDouble;
+            if (double.IsNaN(gateSince)) gateSince = now;
+            if (now - gateSince < MaxGateSec) return true;
+            if (!gateExpired)
+            {
+                gateExpired = true;
+                PaLog.Trace("warn", "msg", "backgroundLoadingPriority stayed High; preloads continue", "seconds", MaxGateSec);
+            }
+            return false;
         }
 
         void Start(Entry e)
@@ -217,6 +274,8 @@ namespace PortAudio.Unity
                 e.State = LoadState.Loading;
                 req.SendWebRequest();
                 loading.Add(e);
+                e.Background = !e.Urgent;
+                if (e.Background) backgroundLoads++;
             }
             catch (Exception ex)
             {
@@ -247,7 +306,7 @@ namespace PortAudio.Unity
 
         void Drop(Entry e)
         {
-            if (e.State == LoadState.Loading || e.State == LoadState.Decoding) loading.Remove(e);
+            if (e.State == LoadState.Loading || e.State == LoadState.Decoding) Untrack(e);
             if (e.State == LoadState.Queued) queue.Remove(e);
             if (e.State == LoadState.Ready) LoadedCount = Math.Max(0, LoadedCount - 1);
             if (e.Request != null) { try { e.Request.Abort(); } catch (Exception) { } }
@@ -306,6 +365,7 @@ namespace PortAudio.Unity
             entries.Clear();
             queue.Clear();
             loading.Clear();
+            backgroundLoads = 0;
             LoadedCount = 0;
             StreamBytes = 0;
         }

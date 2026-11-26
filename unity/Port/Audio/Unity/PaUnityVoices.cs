@@ -13,6 +13,8 @@
 //   (PlayScheduled for future starts, Play otherwise, timeSamples for offsets, late music seeks),
 //   per-frame mix parameters, end detection, then listener callbacks. Play may be called from
 //   inside the callbacks; new voices join on the next Tick and listeners are never called from Play.
+// - Clip progress: a "clips" trace line about once per second while clips are queued or loading
+//   (with "gated" while preloads wait for a scene load), and one when the queue drains.
 
 using System;
 using System.Collections.Generic;
@@ -41,6 +43,7 @@ namespace PortAudio.Unity
         const double StartFudge = 0.002;         // starts closer than this count as "now"
         const double EndGraceSeconds = 0.5;      // predicted-end fallback for real voices
         const double LateTraceSeconds = 0.05;
+        const double ClipTraceSeconds = 1.0;
 
         readonly PaMixerConfig config;
         readonly PaVoicePool pool;
@@ -56,6 +59,8 @@ namespace PortAudio.Unity
         bool decided, running, shutdown;
         double dsp0, real0, virtBase, realBase;
         double lastTickNow = double.NaN;
+        double lastClipTrace = double.NaN;
+        bool clipsBusy;
         readonly double scheduleAhead;
 
         public PaUnityVoices(PaMixerConfig config)
@@ -216,7 +221,7 @@ namespace PortAudio.Unity
         {
             if (shutdown) return;
             Detect();
-            if (!Virtual) cache.Tick();
+            if (!Virtual) { cache.Tick(); TraceClips(); }
             if (added.Count > 0) { voices.AddRange(added); added.Clear(); }
 
             double now = Now;
@@ -491,6 +496,19 @@ namespace PortAudio.Unity
             if (v.Slot != null) { pool.Release(v.Slot); v.Slot = null; }
             if (v.Clip != null) { cache.ReleaseUse(v.Clip); v.Clip = null; }
             if (v.PcmClip != null) { UnityEngine.Object.Destroy(v.PcmClip); v.PcmClip = null; }
+        }
+
+        void TraceClips()
+        {
+            if (!PaLog.Tracing) return;
+            int queued = cache.QueuedCount, inFlight = cache.InFlightCount;
+            bool busy = queued + inFlight > 0;
+            if (!busy && !clipsBusy) return;
+            double t = Time.realtimeSinceStartupAsDouble;
+            if (busy && clipsBusy && !double.IsNaN(lastClipTrace) && t - lastClipTrace < ClipTraceSeconds) return;
+            clipsBusy = busy;
+            lastClipTrace = t;
+            PaLog.Trace("clips", "queued", queued, "loading", inFlight, "loaded", cache.LoadedCount, "gated", cache.Gated);
         }
 
         void TraceStart(Voice v)
