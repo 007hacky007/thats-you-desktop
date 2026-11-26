@@ -94,7 +94,7 @@ test('placeholderStyle: initial and a stable colour', () => {
   assert.equal(placeholderStyle(null).initial, '?');
   // astral code point stays whole
   assert.equal(placeholderStyle('\u{1F600}x').initial, '\u{1F600}');
-  assert.equal(placeholderStyle('émile').initial, 'É');
+  assert.equal(placeholderStyle('\u00e9mile').initial, '\u00c9');
 });
 
 test('placeholderStyle: different names spread over colours', () => {
