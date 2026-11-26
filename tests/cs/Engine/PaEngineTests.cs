@@ -437,6 +437,7 @@ namespace PortAudio.Tests
                 f.Step(0.5);
                 PaAssert.Equal(0, f.Callbacks().Count, "B still waiting, so the missing bank and the unload wait too");
                 PaAssert.True(f.Voices.Preloaded.Exists(p => p.Value.Id == 601), "B's embedded media was preloaded");
+                PaAssert.True(f.Voices.Prefetched.Exists(p => p.Id == 601), "and prefetched, since the caller waits for it");
                 f.Voices.NotReady.Clear();
                 f.Step(0.01);
                 f.Step(0.01);
@@ -452,7 +453,7 @@ namespace PortAudio.Tests
         }
 
         [PaTest]
-        public static void AsyncBankGivesUpWaitingForMediaAfterFiveSeconds()
+        public static void AsyncBankGivesUpWaitingForMediaAfterTheCap()
         {
             using (EngineFixture f = new EngineFixture())
             {
@@ -464,17 +465,70 @@ namespace PortAudio.Tests
                 uint id;
                 PaEngine.LoadBankAsync("Slow", new IntPtr(0x10), out id);
                 Stopwatch sw = Stopwatch.StartNew();
-                while (PaCallbacks.PendingCount == 0 && sw.ElapsedMilliseconds < 3000 && f.Platform.Clock < 4.9)
+                while (PaCallbacks.PendingCount == 0 && sw.ElapsedMilliseconds < 3000 && f.Platform.Clock < PaCore.PreloadWaitSec - 0.1)
                 {
-                    f.Step(0.1);
+                    f.Step(0.05);
                     Thread.Sleep(1);
                 }
-                PaAssert.Equal(0, f.Callbacks().Count, "within 5 s: still waiting");
+                PaAssert.Equal(0, f.Callbacks().Count, "within the cap: still waiting");
                 for (int i = 0; i < 20; i++)
-                    f.Step(0.1);
+                    f.Step(0.05);
                 List<CallbackRecord> got = f.Callbacks();
-                PaAssert.Equal(1, got.Count, "reported after the 5 s cap");
+                PaAssert.Equal(1, got.Count, "reported after the cap");
                 PaAssert.Equal(id, got[0].BankId);
+                PaAssert.True(f.Platform.Clock < PaCore.PreloadWaitSec + 1.1, "the cap is short");
+                PaAssert.True(f.Platform.Logs.Exists(l => l.Contains("bank Slow: media not ready after " + PaCore.PreloadWaitSec + " s")), "warned");
+            }
+        }
+
+        [PaTest]
+        public static void AsyncBankMediaJumpsAheadOfOtherBanksPreloads()
+        {
+            using (EngineFixture f = new EngineFixture())
+            {
+                BankBuilder big = f.Bank("Effects");
+                for (uint i = 0; i < 300; i++)
+                {
+                    big.Sound(1000 + i, 0, 5000 + i);
+                    f.MediaLi.Add(Media.Entry(5000 + i, 1));
+                }
+                BankBuilder small = f.Bank("Commentary");
+                small.Sound(300, 0, 700);
+                small.Sound(301, 0, 701);
+                f.MediaLi.Add(Media.Entry(700, 1));
+                f.MediaLi.Add(Media.Entry(701, 1));
+                f.Start(false);
+                f.Voices.QueueLoads = true;
+                for (uint i = 0; i < 300; i++)
+                    f.Voices.NotReady.Add(5000 + i);
+                f.Voices.NotReady.Add(700);
+                f.Voices.NotReady.Add(701);
+
+                uint bigId, smallId;
+                PaAssert.Equal(PaResult.Success, PaEngine.LoadBank("Effects", out bigId));
+                f.Step(0.01);
+                PaAssert.True(f.Voices.QueuedLoads > 250, "the sync bank queued its preloads");
+                IntPtr cookie = new IntPtr(0x4242);
+                PaAssert.Equal(PaResult.Success, PaEngine.LoadBankAsync("Commentary", cookie, out smallId));
+
+                List<CallbackRecord> got = new List<CallbackRecord>();
+                Stopwatch sw = Stopwatch.StartNew();
+                int ticks = 0;
+                while (got.Count == 0 && sw.ElapsedMilliseconds < 5000 && f.Platform.Clock < 5.0)
+                {
+                    f.Step(0.01);
+                    ticks++;
+                    got.AddRange(f.Callbacks());
+                    if (got.Count == 0)
+                        Thread.Sleep(1);
+                }
+                PaAssert.Equal(1, got.Count, "AK_Bank arrived");
+                PaAssert.Equal(smallId, got[0].BankId);
+                PaAssert.Equal(cookie, got[0].Cookie);
+                PaAssert.Equal(PaResult.Success, got[0].Result);
+                PaAssert.True(f.Voices.IsReady(Media.Entry(700, 1)) && f.Voices.IsReady(Media.Entry(701, 1)), "its media is ready");
+                PaAssert.True(f.Voices.QueuedLoads > 200, "it did not wait for the other bank's preloads (" + f.Voices.QueuedLoads + " left)");
+                PaAssert.False(f.Platform.Logs.Exists(l => l.Contains("media not ready")), "no timeout");
             }
         }
 

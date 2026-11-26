@@ -4,9 +4,10 @@
 // them). Loading is reference counted, as in Wwise: Init.bnk is loaded twice by the game.
 //   sync   LoadBank:      read and register on the calling thread, embedded media preloads start
 //                         on the next tick
-//   async  LoadBankAsync: read on a pool thread, register on a tick, wait until the bank's
-//                         embedded media is ready (at most 5 s, the game gives up after 8 s),
-//                         then AK_Bank
+//   async  LoadBankAsync: read on a pool thread, register on a tick, prefetch the bank's
+//                         embedded media (urgent, so it does not wait behind the preloads of
+//                         other banks), wait until it is ready (at most PreloadWaitSec; a voice
+//                         whose clip is not ready only starts late), then AK_Bank
 //   unload:               release; voices whose nodes went away stop with a short fade
 // Async requests (loads, unloads, prepare requests) complete strictly in request order, like
 // the single bank thread of Wwise.
@@ -41,7 +42,7 @@ namespace PortAudio
 
     internal sealed partial class PaCore
     {
-        public const double PreloadWaitSec = 5.0;
+        public const double PreloadWaitSec = 1.0;
 
         readonly List<PaBankOp> bankOps = new List<PaBankOp>();
         readonly Dictionary<uint, object> bankOwners = new Dictionary<uint, object>();
@@ -344,7 +345,11 @@ namespace PortAudio
                 op.PreloadDeadline = now + PreloadWaitSec;
                 stats.BanksLoaded++;
                 TraceBank("load", op.Bank.Name, op.Bank.Id, op.Bank.LanguageKey, result, op.Clock.Elapsed.TotalMilliseconds, ObjectCount(op.Bank));
-                // Preloads start in this tick (RunPreloads runs after the bank requests).
+                // The caller waits for this bank, so its media jumps the preload queue (a sync
+                // bank may have queued thousands of clips just before). The owned preloads
+                // still start in this tick (RunPreloads runs after the bank requests).
+                foreach (PaMediaEntry e in op.Preloads)
+                    voices.Prefetch(e);
                 return false;
             }
             bool ready = true;

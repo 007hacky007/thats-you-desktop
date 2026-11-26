@@ -182,19 +182,56 @@ namespace PortAudio.Tests
             return v;
         }
 
+        // QueueLoads mimics the clip cache: Preload and Prefetch queue media that is not ready
+        // yet, Tick loads one queued entry, urgent (prefetched) entries first, then in request
+        // order.
+        public bool QueueLoads;
+        readonly List<uint> loadQueue = new List<uint>();
+        readonly HashSet<uint> urgent = new HashSet<uint>();
+
+        void Request(PaMediaEntry e, bool isUrgent)
+        {
+            if (!QueueLoads || e == null || !NotReady.Contains(e.Id))
+                return;
+            if (!loadQueue.Contains(e.Id))
+                loadQueue.Add(e.Id);
+            if (isUrgent)
+                urgent.Add(e.Id);
+        }
+
+        public int QueuedLoads { get { return loadQueue.Count; } }
+
         public void Preload(IEnumerable<PaMediaEntry> media, object owner)
         {
             foreach (PaMediaEntry e in media)
+            {
                 Preloaded.Add(new KeyValuePair<object, PaMediaEntry>(owner, e));
+                Request(e, false);
+            }
         }
 
         public void ReleaseOwner(object owner) { Released.Add(owner); }
-        public void Prefetch(PaMediaEntry media) { Prefetched.Add(media); }
+        public void Prefetch(PaMediaEntry media) { Prefetched.Add(media); Request(media, true); }
         public bool IsReady(PaMediaEntry media) { return !NotReady.Contains(media.Id); }
+
+        void LoadOne()
+        {
+            if (loadQueue.Count == 0)
+                return;
+            int pick = loadQueue.FindIndex(id => urgent.Contains(id));
+            if (pick < 0)
+                pick = 0;
+            uint id = loadQueue[pick];
+            loadQueue.RemoveAt(pick);
+            urgent.Remove(id);
+            NotReady.Remove(id);
+        }
 
         public void Tick()
         {
             Ticks++;
+            if (QueueLoads)
+                LoadOne();
             double now = Now;
             foreach (EngineVoice v in All.ToArray())
             {
