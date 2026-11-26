@@ -124,7 +124,7 @@ def make_export(root: Path) -> Path:
     (loc / "appText_en.loc.loc").write_bytes(
         "String Id\tLocalised Text\r\nHello\tHi there{n}you\r\nTabbed\ta\tb\r\n\r\nNoTab\r\n".encode("utf-8"))
     (loc / "appText_cs.loc.loc").write_bytes(
-        "﻿String Id\tLocalised Text\r\nHello\tAhoj člověk\r\n".encode("utf-8"))
+        "\ufeffString Id\tLocalised Text\r\nHello\tAhoj \u010dlov\u011bk\r\n".encode("utf-8"))
     (loc / "appText_DBG_KEYS.loc.loc").write_bytes(b"String Id\tLocalised Text\r\nHello\tHello\r\n")
     (loc / "appText_en.loc.loc.meta").write_text("meta\n")
     (r / "audio" / "sounds" / "sub").mkdir(parents=True)
@@ -228,7 +228,7 @@ class BuildWebTests(unittest.TestCase):
         en = json.loads((self.out / "i18n" / "en.json").read_text(encoding="utf-8"))
         self.assertEqual(en, {"Hello": "Hi there{n}you", "Tabbed": "a\tb"})
         cs = json.loads((self.out / "i18n" / "cs.json").read_text(encoding="utf-8"))
-        self.assertEqual(cs["Hello"], "Ahoj člověk")
+        self.assertEqual(cs["Hello"], "Ahoj \u010dlov\u011bk")
         self.assertFalse((self.out / "i18n" / "DBG_KEYS.json").exists())
 
     def test_precache_and_headers(self):

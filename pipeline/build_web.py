@@ -86,7 +86,7 @@ def lenient_json(text: str):
         else:
             out.append(c)
             i += 1
-    return json.loads("".join(out).lstrip("﻿"))
+    return json.loads("".join(out).lstrip("\ufeff"))
 
 
 SPRITE_START = re.compile(r"^\s*- name:\s*(.*?)\s*$")
