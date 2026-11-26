@@ -28,8 +28,8 @@ Shader "Hidden/InterpolateAlongRays"
         }
     }
 
-    // Fallback for hardware without integer render targets: the driver then uses an RGFloat
-    // interpolation texture, read through a sampler.
+    // Fallback for SM3.0 hardware: the RGFloat interpolation texture is read through a
+    // point-sampled sampler instead of Load.
     SubShader
     {
         Tags { "RenderType" = "Opaque" }

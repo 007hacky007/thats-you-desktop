@@ -12,8 +12,11 @@
 // - "Screen uv" is the camera viewport position in [0,1] (y up), the same space as
 //   Camera.WorldToViewportPoint, so it can be used directly with _CameraDepthTexture.
 // - _InterpolationEpi stores, per epipolar texel, the column indices of the raymarched
-//   samples on its left and right. LS_INT_INTERP selects the integer texture path used when
-//   the driver picks RenderTextureFormat.RGInt (graphicsShaderLevel >= 50).
+//   samples on its left and right. It is always a float texture (RGFloat, point filtered)
+//   holding whole numbers; readers round what they fetch to integer indices. An integer
+//   render target is not used because Metal rejects an int4 fragment output whenever the
+//   pipeline is validated against a non-integer color attachment. LS_INT_INTERP only
+//   selects exact texel Load() addressing on SM4.5+ instead of point-sampled tex2Dlod.
 
 #ifndef PORT_LIGHTSHAFTS_INCLUDED
 #define PORT_LIGHTSHAFTS_INCLUDED
@@ -154,22 +157,22 @@ float LS_SceneDepth01(float2 suv)
 #ifdef LS_INT_INTERP
     #define LS_DECLARE_EPI(name) Texture2D<float4> name
     #define LS_FETCH_EPI(name, dim, ij) name.Load(int3(int2(ij), 0))
-    Texture2D<int4> _InterpolationEpi;
-    #define LS_FETCH_INTERP(dim, ij) float2(_InterpolationEpi.Load(int3(int2(ij), 0)).xy)
+    Texture2D<float4> _InterpolationEpi;
+    #define LS_FETCH_INTERP(dim, ij) floor(_InterpolationEpi.Load(int3(int2(ij), 0)).xy + 0.5)
 #else
     #define LS_DECLARE_EPI(name) sampler2D_float name
     #define LS_FETCH_EPI(name, dim, ij) tex2Dlod(name, float4(((ij) + 0.5) * (dim).zw, 0.0, 0.0))
     sampler2D_float _InterpolationEpi;
-    #define LS_FETCH_INTERP(dim, ij) tex2Dlod(_InterpolationEpi, float4(((ij) + 0.5) * (dim).zw, 0.0, 0.0)).xy
+    #define LS_FETCH_INTERP(dim, ij) floor(tex2Dlod(_InterpolationEpi, float4(((ij) + 0.5) * (dim).zw, 0.0, 0.0)).xy + 0.5)
 #endif
 
 // Fetches of the texel a fragment is shading, usable without knowing the texture size.
 #ifdef LS_INT_INTERP
     #define LS_FETCH_EPI_SELF(name, i) name.Load(int3(int2(floor((i).pos.xy)), 0))
-    #define LS_FETCH_INTERP_SELF(i) float2(_InterpolationEpi.Load(int3(int2(floor((i).pos.xy)), 0)).xy)
+    #define LS_FETCH_INTERP_SELF(i) floor(_InterpolationEpi.Load(int3(int2(floor((i).pos.xy)), 0)).xy + 0.5)
 #else
     #define LS_FETCH_EPI_SELF(name, i) tex2Dlod(name, float4((i).uv, 0.0, 0.0))
-    #define LS_FETCH_INTERP_SELF(i) tex2Dlod(_InterpolationEpi, float4((i).uv, 0.0, 0.0)).xy
+    #define LS_FETCH_INTERP_SELF(i) floor(tex2Dlod(_InterpolationEpi, float4((i).uv, 0.0, 0.0)).xy + 0.5)
 #endif
 
 // Column/row index of the texel a fragment is shading.
@@ -183,8 +186,8 @@ float2 LS_SelfTexel(ls_v2f i, float4 dim)
 }
 
 // =======================================================================================
-// Pass bodies. Each shader defines LS_PASS_<NAME> (and LS_INT_INTERP for the integer
-// subshader) before including this file.
+// Pass bodies. Each shader defines LS_PASS_<NAME> (and LS_INT_INTERP for the SM4.5
+// subshader, which addresses texels with Load) before including this file.
 
 #ifdef LS_PASS_DEPTHBREAKS
 // For every epipolar sample find the nearest raymarched samples to the left and right.
