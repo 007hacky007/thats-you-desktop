@@ -12,7 +12,7 @@ func TestCheckHello(t *testing.T) {
 		{`{"t":"hello","token":"AbCdEfGh12345678","uid":"dev-1"}`, "dev-1"},
 		{`{"uid":"x","extra":[1,2],"token":"AbCdEfGh12345678","t":"hello"}`, "x"},
 		{`{"t":"hello","token":"AbCdEfGh12345678","uid":"` + strings.Repeat("u", 128) + `"}`, strings.Repeat("u", 128)},
-		{`{"t":"hello","token":"AbCdEfGh12345678","uid":"café"}`, "café"},
+		{`{"t":"hello","token":"AbCdEfGh12345678","uid":"caf\u00e9"}`, "caf\u00e9"},
 	}
 	for _, g := range good {
 		uid, err := CheckHello([]byte(g.frame), tok)
