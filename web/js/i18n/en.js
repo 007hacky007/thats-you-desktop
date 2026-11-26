@@ -114,6 +114,7 @@ export const EN = {
   'port.guest': 'Play as a guest',
   'port.namePlaceholder': 'Your name',
   'port.leave': 'Leave game',
+  'port.rotate': 'Turn your phone upright',
   'port.badConnection': 'Weak connection',
   'port.loadError': 'The page could not start',
   'port.loadErrorHelp': 'Reload the page. If this keeps happening, the page files are incomplete',

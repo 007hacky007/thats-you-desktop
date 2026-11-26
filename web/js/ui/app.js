@@ -6,6 +6,7 @@ import { loadScreen, loadOverlay, OVERLAY_MODULES } from './registry.js';
 import { iconFactory } from './icons.js';
 import { silentSound } from './sound.js';
 import { cssUrl } from '../assets/assets.js';
+import { attachFit } from './fit.js';
 
 // Highest first. Popups always win; bad-connection is only an indicator.
 export const OVERLAY_PRIORITY = ['popup', 'leave', 'reconnecting', 'pause', 'effects', 'bad-connection'];
@@ -84,8 +85,11 @@ export function createApp(options) {
   const nav = h('header', { class: 'navbar' }, leaveBtn);
   const host = h('main', { class: 'screen-host' });
   const overlayHost = h('div', { class: 'overlay-host' });
-  const shell = h('div', { class: 'app' }, bg, nav, host, overlayHost);
+  const rotateHint = h('div', { class: 'rotate-hint', testid: 'rotate-hint', attrs: { role: 'status' } },
+    h('div', { class: 'rotate-phone', attrs: { 'aria-hidden': 'true' } }), h('p', { text: t('port.rotate') }));
+  const shell = h('div', { class: 'app' }, bg, nav, host, overlayHost, rotateHint);
   root.appendChild(shell);
+  const fit = attachFit(host, globalThis.window || {});
 
   const local = new Map();
   const mountedOverlays = new Map(); // id -> { el, instance, pending }
@@ -173,6 +177,7 @@ export function createApp(options) {
     shownView = entry.view;
     host.scrollTop = 0;
     updateChrome();
+    fit.refit();
   }
 
   function overlayCtx(id, el) {
@@ -274,6 +279,7 @@ export function createApp(options) {
     checkLink,
     destroy() {
       destroyed = true;
+      fit.stop();
       for (const off of offs) { try { if (typeof off === 'function') off(); } catch { /* ignore */ } }
       if (current && current.instance) { try { current.instance.unmount(); } catch { /* ignore */ } }
       for (const m of mountedOverlays.values()) { try { m.instance && m.instance.unmount(); } catch { /* ignore */ } }
