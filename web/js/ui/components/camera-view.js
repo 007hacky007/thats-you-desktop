@@ -9,6 +9,7 @@ import {
   button, setShown, setEnabled, jpegUrl, playSound, setArtBackground,
 } from './ui-bits.js';
 import { attachFlick } from '../flick.js';
+import { cameraOwners } from './camera-owner.js';
 
 // opts: { mode: 'selfie'|'topdrawer'|'quickdraw'|'mimic', facing, effect, placeholderName, caption }
 export function createCameraView(ctx, opts) {
@@ -19,6 +20,7 @@ export function createCameraView(ctx, opts) {
   let busy = false;
   let renderer = null;
   const offs = [];
+  const owner = cameraOwners.mount();
 
   try {
     renderer = media.createRenderer({ width: 480, height: 640 });
@@ -134,13 +136,13 @@ export function createCameraView(ctx, opts) {
     if (!renderer) { flow.noCamera(); return; }
     try {
       await media.camera.start(facing || 'user');
-      if (destroyed) return;
+      if (destroyed) { owner.settled(media.camera); return; }
       renderer.attach(media.camera);
       setEffect(Number.isInteger(opts.effect) ? opts.effect : 0);
       renderer.start();
       setShown(flipBtn, !!media.camera.canFlip);
     } catch (e) {
-      if (destroyed) return;
+      if (destroyed) { owner.settled(media.camera); return; }
       if (log) log.warn('camera start failed', String(e && (e.name || e.message)));
       flow.noCamera();
     }
@@ -185,6 +187,7 @@ export function createCameraView(ctx, opts) {
     } catch (e) {
       if (log) log.warn('camera flip failed', String(e && e.message));
     }
+    if (destroyed) { owner.settled(media.camera); return; }
     busy = false;
     render();
   }
@@ -231,7 +234,7 @@ export function createCameraView(ctx, opts) {
       if (renderer) {
         try { renderer.stop(); renderer.destroy(); } catch { /* ignore */ }
       }
-      try { media.camera.release(); } catch { /* ignore */ }
+      owner.unmount(media.camera);
       setStill(null);
     },
   };

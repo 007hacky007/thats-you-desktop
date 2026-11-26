@@ -35,10 +35,7 @@ export function createPhotoFlow({ mode, actions, capture, onError }) {
 
     async shutter() {
       if (destroyed || flow.state !== 'live') return false;
-      if (mode === 'topdrawer' && !photoTakenSent) {
-        photoTakenSent = true;
-        actions.photoTaken();
-      }
+      sendPhotoTaken();
       set('capturing');
       let shot;
       try {
@@ -87,6 +84,7 @@ export function createPhotoFlow({ mode, actions, capture, onError }) {
     usePlaceholder(jpeg) {
       if (destroyed || !jpeg || !jpeg.length) return false;
       if (flow.state !== 'nocamera' && flow.state !== 'live') return false;
+      sendPhotoTaken();
       flow.still = { jpeg, usesFX: false };
       flow.placeholder = true;
       set('captured');
@@ -126,6 +124,13 @@ export function createPhotoFlow({ mode, actions, capture, onError }) {
       listeners.clear();
     },
   };
+
+  // Top Drawer: TV flash once, at the first shutter press or placeholder use
+  function sendPhotoTaken() {
+    if (mode !== 'topdrawer' || photoTakenSent) return;
+    photoTakenSent = true;
+    actions.photoTaken();
+  }
 
   function set(state) {
     flow.state = state;

@@ -175,3 +175,23 @@ test('change listeners fire on transitions', async () => {
   flow.noCamera();
   assert.deepEqual(states, ['capturing', 'captured', 'live']);
 });
+
+test('topdrawer: using the no-camera placeholder sends photoTaken once, then submitPhoto', () => {
+  const actions = fakeActions();
+  const flow = createPhotoFlow({ mode: 'topdrawer', actions, capture: capturer() });
+  flow.noCamera();
+  assert.equal(flow.usePlaceholder(JPEG), true);
+  assert.deepEqual(actions.calls, [['photoTaken']]);
+  flow.retake();
+  flow.usePlaceholder(JPEG);
+  flow.use();
+  assert.deepEqual(actions.calls, [['photoTaken'], ['submitPhoto', { jpeg: JPEG, usesFX: false }]]);
+});
+
+test('quickdraw placeholder sends no photoTaken', () => {
+  const actions = fakeActions();
+  const flow = createPhotoFlow({ mode: 'quickdraw', actions, capture: capturer() });
+  flow.noCamera();
+  flow.usePlaceholder(JPEG);
+  assert.deepEqual(actions.calls, []);
+});
