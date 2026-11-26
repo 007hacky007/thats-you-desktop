@@ -222,6 +222,8 @@ class FakePage:
 
     def tap(self, target):
         self.log.append((self.name, "tap", target))
+        if target in self.screens.get("fail_taps", ()):
+            raise E2EError(f"element {target} not found")
 
     def reload(self):
         self.log.append((self.name, "reload", dict(self.pending_storage)))
@@ -229,12 +231,19 @@ class FakePage:
 
 
 class FakeAPI:
-    def __init__(self, log, verdicts):
+    def __init__(self, log, verdicts, page_done_fails=()):
         self.log = log
         self.verdicts = verdicts
+        self.page_done_fails = set(page_done_fails)
 
-    def start_step(self, i):
-        self.log.append(("api", "start", i))
+    def start_step(self, i, page_actions=False):
+        self.log.append(("api", "start", i, page_actions))
+
+    def page_done(self, i):
+        self.log.append(("api", "page-done", i))
+        if i in self.page_done_fails:
+            raise E2EError("boom")
+        return True
 
     def result(self, i, timeout_ms):
         self.log.append(("api", "result", i))
@@ -251,16 +260,16 @@ class FakeConsole:
 
 
 class RunnerTests(unittest.TestCase):
-    def run_scenario(self, verdicts=None, screens=None):
+    def run_scenario(self, verdicts=None, screens=None, data=None, page_done_fails=()):
         log = []
-        api = FakeAPI(log, verdicts or {})
+        api = FakeAPI(log, verdicts or {}, page_done_fails)
         pages = {}
 
         def open_page(p):
             pages[p] = FakePage(f"p{p}", log, screens)
             return pages[p]
         with tempfile.TemporaryDirectory() as t:
-            runner = web_e2e.ScenarioRunner(web_e2e.parse_scenario(scenario()), FakeConsole(api), open_page,
+            runner = web_e2e.ScenarioRunner(web_e2e.parse_scenario(data or scenario()), FakeConsole(api), open_page,
                                             Path(t), "http://127.0.0.1:9/", log=lambda m: None, sleep=lambda s: None)
             return runner.run(), log
 
@@ -270,9 +279,10 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(log, [
             ("p0", "navigate", "http://127.0.0.1:9/#h=1"), ("p0", "wait_screen", "connect", None),
             ("p1", "navigate", "http://127.0.0.1:9/#h=1"), ("p1", "wait_screen", "connect", None),
-            ("api", "start", 0), ("p0", "wait_screen", "joined", None), ("p0", "screenshot", "00-join.png"),
-            ("p0", "tap", "connect-play"), ("api", "result", 0),
-            ("api", "start", 1), ("p1", "reload", {"iwyk.uid": "uid0"}), ("api", "result", 1),
+            ("api", "start", 0, True), ("p0", "wait_screen", "joined", None), ("p0", "screenshot", "00-join.png"),
+            ("p0", "tap", "connect-play"), ("api", "page-done", 0), ("api", "result", 0),
+            ("api", "start", 1, True), ("p1", "reload", {"iwyk.uid": "uid0"}), ("api", "page-done", 1),
+            ("api", "result", 1),
         ])
         self.assertEqual([s["id"] for s in result["steps"]], ["join", "dup"])
         self.assertTrue(result["steps"][0]["screenshot"].endswith("00-join.png"))
@@ -291,7 +301,30 @@ class RunnerTests(unittest.TestCase):
         result, log = self.run_scenario(screens={"connect": False})
         self.assertFalse(result["pass"])
         self.assertTrue(all("opening the pages failed" in s["errors"][0] for s in result["steps"]))
-        self.assertNotIn(("api", "start", 0), log)
+        self.assertFalse(any(e[:2] == ("api", "start") for e in log))
+        self.assertFalse(any(e[:2] == ("api", "page-done") for e in log))
+
+    def test_step_without_page_actions_sends_no_page_done(self):
+        data = scenario(steps=[{"id": "look", "screen": "joined"}])
+        result, log = self.run_scenario(data=data)
+        self.assertTrue(result["pass"])
+        self.assertIn(("api", "start", 0, False), log)
+        self.assertFalse(any(e[:2] == ("api", "page-done") for e in log))
+
+    def test_page_done_sent_even_if_an_action_fails(self):
+        data = scenario(steps=[{"id": "a", "page": [{"do": "tap", "target": "gone"},
+                                                    {"do": "tap", "target": "never"}]}])
+        result, log = self.run_scenario(data=data, screens={"fail_taps": ["gone"]})
+        self.assertEqual([e for e in log if e[0] != "p1" and e[1] in ("tap", "page-done", "result")],
+                         [("p0", "tap", "gone"), ("api", "page-done", 0), ("api", "result", 0)])
+        self.assertFalse(result["pass"])
+        self.assertIn("action 0 (tap)", result["steps"][0]["errors"][0])
+
+    def test_page_done_failure_is_a_harness_error(self):
+        result, log = self.run_scenario(page_done_fails=[0])
+        self.assertIn(("api", "result", 0), log)
+        self.assertFalse(result["steps"][0]["pass"])
+        self.assertIn("harness: page-done failed: boom", result["steps"][0]["errors"])
 
 
 class ConsoleTests(unittest.TestCase):
@@ -354,12 +387,53 @@ class ConsoleTests(unittest.TestCase):
         self.assertEqual(api.result(3, 1500), {"pass": True})
         self.assertIn(("GET", "http://127.0.0.1:5/api/steps/3/result?timeout_ms=1500"), calls)
 
+    def test_start_body_and_page_done(self):
+        calls = []
+        status = {"code": 200}
+
+        def request(method, url, body, timeout):
+            calls.append((method, url, body))
+            if url.endswith("/page-done"):
+                return status["code"], {"error": "x"} if status["code"] >= 400 else {"ok": True}
+            return 200, {"ok": True}
+        api = web_e2e.ConsoleAPI("127.0.0.1:5", request)
+        api.start_step(1, page_actions=True)
+        api.start_step(2)
+        self.assertEqual(calls[0], ("POST", "http://127.0.0.1:5/api/steps/1/start", {"page_actions": True}))
+        self.assertEqual(calls[1], ("POST", "http://127.0.0.1:5/api/steps/2/start", {}))
+        self.assertTrue(api.page_done(1))
+        self.assertEqual(calls[2][:2], ("POST", "http://127.0.0.1:5/api/steps/1/page-done"))
+        for old in (400, 404, 405):
+            status["code"] = old
+            self.assertFalse(api.page_done(1), old)
+        status["code"] = 500
+        with self.assertRaisesRegex(E2EError, "500"):
+            api.page_done(1)
+
 
 class MiscTests(unittest.TestCase):
     def test_free_port(self):
         p = web_common.free_port()
         with socket.socket() as s:
             s.bind(("127.0.0.1", p))
+
+    def test_chrome_args_camera_file(self):
+        args = web_e2e.chrome_args("/c", Path("/tmp/p"), camera_file=Path("/tmp/o/test-pattern.y4m"))
+        self.assertIn("--use-file-for-fake-video-capture=/tmp/o/test-pattern.y4m", args)
+        self.assertIn("--use-fake-device-for-media-stream", args)
+        self.assertFalse(any(a.startswith("--use-file-for-fake") for a in web_e2e.chrome_args("/c", Path("/p"))))
+
+    def test_main_parses_camera_option(self):
+        seen = {}
+        orig = web_e2e.run
+        web_e2e.run = lambda args: seen.setdefault("camera", args.camera) and 0
+        try:
+            web_e2e.main(["--all"])
+            self.assertEqual(seen.pop("camera"), "pattern")
+            web_e2e.main(["--all", "--camera", "default"])
+            self.assertEqual(seen.pop("camera"), "default")
+        finally:
+            web_e2e.run = orig
 
     def test_chrome_args(self):
         args = web_e2e.chrome_args("/c", Path("/tmp/p"))
@@ -377,6 +451,77 @@ class MiscTests(unittest.TestCase):
             self.assertFalse(rep["pass"])
             self.assertEqual(json.loads(p.read_text()), {"mode": "neutral", "pass": False, "scenarios": sc})
             self.assertTrue(web_e2e.write_report(p, "art", sc[:1])["pass"])
+
+
+class TestPatternTests(unittest.TestCase):
+    def test_frame_size(self):
+        self.assertEqual(web_e2e.y4m_frame_size(640, 480), 640 * 480 * 3 // 2)
+        self.assertEqual(web_e2e.y4m_frame_size(5, 3), 15 + 2 * 3 * 2)
+
+    def test_rgb_to_ycbcr(self):
+        self.assertEqual(web_e2e.rgb_to_ycbcr(255, 255, 255), (255, 128, 128))
+        self.assertEqual(web_e2e.rgb_to_ycbcr(0, 0, 0), (0, 128, 128))
+        y, cb, cr = web_e2e.rgb_to_ycbcr(255, 0, 0)
+        self.assertEqual((y, cb, cr), (76, 85, 255))
+
+    def test_file_layout(self):
+        with tempfile.TemporaryDirectory() as t:
+            p = web_e2e.write_test_pattern(Path(t) / "sub" / "pattern.y4m")
+            data = p.read_bytes()
+            header, rest = data.split(b"\n", 1)
+            self.assertEqual(header, b"YUV4MPEG2 W640 H480 F15:1 Ip A1:1 C420jpeg")
+            fs = 6 + web_e2e.y4m_frame_size(640, 480)
+            self.assertEqual(len(rest), 30 * fs)
+            for i in range(30):
+                self.assertEqual(rest[i * fs:i * fs + 6], b"FRAME\n")
+            y = rest[6:6 + 640 * 480]
+            # first bar (white) on the left, last bar (black) on the right, away from the lines
+            self.assertEqual(y[100 * 640 + 20], 255)
+            self.assertEqual(y[100 * 640 + 620], 0)
+            # grid line at x = 40, diagonal through the centre
+            self.assertEqual(y[100 * 640 + 40], 128)
+            self.assertEqual(y[239 * 640 + 319], 255)
+            # frames differ (moving marker), so the stream is visibly live
+            self.assertNotEqual(rest[6:fs], rest[fs + 6:2 * fs])
+
+    def test_small_custom_size(self):
+        with tempfile.TemporaryDirectory() as t:
+            p = web_e2e.write_test_pattern(Path(t) / "p.y4m", width=64, height=48, fps=10, frames=3)
+            header, rest = p.read_bytes().split(b"\n", 1)
+            self.assertEqual(header, b"YUV4MPEG2 W64 H48 F10:1 Ip A1:1 C420jpeg")
+            self.assertEqual(len(rest), 3 * (6 + web_e2e.y4m_frame_size(64, 48)))
+
+
+class PageErrorTests(unittest.TestCase):
+    LOG = [
+        "09:00:00.001 console.log: boot\n",
+        "09:00:00.002 log.error: Failed to load resource: the server responded with a status of 404 (Not Found) "
+        "http://127.0.0.1:1/css/art/ui/TableTop2_Albedo.png\n",
+        "09:00:00.003 log.warning: something\n",
+        "09:00:00.004 exception: TypeError: x is undefined\n",
+        "09:00:00.005 console.error: not collected\n",
+        "garbage line exception: no stamp prefix\n",
+    ]
+
+    def test_from_lines(self):
+        got = web_e2e.page_errors_from_lines(self.LOG, "page-0")
+        self.assertEqual(got, [
+            "page-0: log.error: Failed to load resource: the server responded with a status of 404 (Not Found) "
+            "http://127.0.0.1:1/css/art/ui/TableTop2_Albedo.png",
+            "page-0: exception: TypeError: x is undefined",
+        ])
+
+    def test_collect_from_directory(self):
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            (t / "page-1.log").write_text("09:00:00.000 exception: B\n")
+            (t / "page-0.log").write_text("".join(self.LOG))
+            (t / "console-stdout.log").write_text("09:00:00.000 exception: not a page\n")
+            got = web_e2e.collect_page_errors(t)
+            self.assertEqual(len(got), 3)
+            self.assertTrue(got[0].startswith("page-0: log.error"))
+            self.assertEqual(got[-1], "page-1: exception: B")
+            self.assertEqual(web_e2e.collect_page_errors(t / "missing"), [])
 
 
 if __name__ == "__main__":

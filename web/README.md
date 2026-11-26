@@ -97,3 +97,27 @@ connect `connect-play`; nav `leave`; leave overlay `leave-confirm`,
 
 `node --test web/test/` (U5 parts: `test/ui`, `test/i18n`, `test/assets`,
 `test/lint`). `test/ui/fakedom.mjs` is a tiny DOM stand-in for screen tests.
+
+## End-to-end runs
+
+`python3 -m pipeline.web_e2e --all --loopback` (add `--art` for the
+`build_web` output) drives headless Chrome against the mock console
+(`tools/mockconsole`) over WebRTC Direct. Results go to
+`work/reports/web-e2e.json`, screenshots and per-page logs to
+`work/e2e/<UTC stamp>/<scenario>/`.
+
+- Page-done signalling: for a step with page actions the harness starts it
+  with `{"page_actions": true}` and calls `POST /api/steps/<i>/page-done`
+  once the actions ran (also after a failed action), so the console's
+  `none_ms` expectations start after the page is done. A console without the
+  call (404, 400 or 405) is tolerated.
+- Fake camera: by default Chrome gets
+  `--use-file-for-fake-video-capture=<out>/test-pattern.y4m`, a 640x480,
+  15 fps, 30 frame C420jpeg pattern (colour bars, grid, both diagonals, a
+  circle and a moving marker) written in pure Python at run time, so camera
+  effect warps are easy to judge in screenshots. `--camera default` keeps
+  Chrome's built-in fake.
+- Page errors: `log.error` and `exception` lines of every `page-<n>.log` are
+  listed per scenario as `page_errors` in the report and counted at the end.
+  They do not fail the run (neutral mode always has the `art/manifest.json`
+  404).

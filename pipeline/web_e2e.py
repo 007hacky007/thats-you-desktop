@@ -1,15 +1,20 @@
 """End-to-end test of the phone page: headless Chrome against the mock console over WebRTC Direct.
 
 CLI: python3 -m pipeline.web_e2e [--scenario NAME ...] [--all] [--art] [--headful] [--chrome PATH]
-                                  [--loopback] [--keep] [--out DIR]
+                                  [--loopback] [--keep] [--out DIR] [--camera {pattern,default}]
 
 Per run: serve the page (web/, or the build_web output with --art) on a free local port, build
-tools/mockconsole into work/e2e/bin, start Chrome once (fake camera, CDP over a pipe). Per
-scenario: start the mock console with the scenario file, open one browser context per scenario
-player at the join URL, then for every step start it on the console, wait for the page screen,
-take a screenshot, run the step's page actions and collect the console's verdict.
+tools/mockconsole into work/e2e/bin, start Chrome once (fake camera, CDP over a pipe). The fake
+camera shows a test pattern (bars, grid, diagonals, circle) written as a y4m file into the out dir
+at run time; --camera default keeps Chrome's built-in fake. Per scenario: start the mock console
+with the scenario file, open one browser context per scenario player at the join URL, then for
+every step start it on the console (telling it whether page actions follow), wait for the page
+screen, take a screenshot, run the step's page actions, tell the console they are done
+(POST /api/steps/<i>/page-done) and collect the console's verdict.
 
 Report: work/reports/web-e2e.json; screenshots and logs under work/e2e/<UTC stamp>/<scenario>/.
+Page console errors (log.error and exception lines of the page logs) are listed per scenario as
+page_errors; they do not fail the run.
 Exit code 0 iff every step of every selected scenario passed.
 """
 from __future__ import annotations
@@ -192,8 +197,17 @@ class ConsoleAPI:
             raise E2EError(f"{method} {path}: HTTP {status} {data}")
         return data
 
-    def start_step(self, i: int) -> None:
-        self._call("POST", f"/api/steps/{i}/start", {})
+    def start_step(self, i: int, page_actions: bool = False) -> None:
+        self._call("POST", f"/api/steps/{i}/start", {"page_actions": True} if page_actions else {})
+
+    def page_done(self, i: int) -> bool:
+        """Tell the console the page actions of step i ran. False when the console does not know the call."""
+        status, data = self.request("POST", f"{self.base}/api/steps/{i}/page-done", {}, 10.0)
+        if status in (400, 404, 405):
+            return False
+        if status >= 400:
+            raise E2EError(f"POST /api/steps/{i}/page-done: HTTP {status} {data}")
+        return True
 
     def result(self, i: int, timeout_ms: int) -> dict:
         return self._call("GET", f"/api/steps/{i}/result?timeout_ms={int(timeout_ms)}",
@@ -332,9 +346,126 @@ def find_chrome(explicit: str | None = None) -> str:
     raise E2EError("Chrome not found (pass --chrome PATH)")
 
 
-def chrome_args(chrome: str, user_data: Path, headful: bool = False) -> list[str]:
+def chrome_args(chrome: str, user_data: Path, headful: bool = False, camera_file: Path | None = None) -> list[str]:
     flags = [f for f in CHROME_FLAGS if not (headful and f.startswith("--headless"))]
+    if camera_file is not None:
+        flags.append(f"--use-file-for-fake-video-capture={camera_file}")
     return [chrome] + flags + [f"--user-data-dir={user_data}", "about:blank"]
+
+
+# ================================================================ fake camera test pattern
+
+PATTERN_W, PATTERN_H, PATTERN_FPS, PATTERN_FRAMES = 640, 480, 15, 30
+# colour bars (RGB), left to right
+PATTERN_BARS = [(255, 255, 255), (255, 255, 0), (0, 255, 255), (0, 255, 0),
+                (255, 0, 255), (255, 0, 0), (0, 0, 255), (0, 0, 0)]
+GRID_STEP = 40
+
+
+def rgb_to_ycbcr(r: int, g: int, b: int) -> tuple[int, int, int]:
+    """Full range BT.601 (JFIF), as used by y4m C420jpeg."""
+    def clamp(v):
+        return max(0, min(255, int(round(v))))
+    y = 0.299 * r + 0.587 * g + 0.114 * b
+    cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b
+    cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b
+    return clamp(y), clamp(cb), clamp(cr)
+
+
+def y4m_frame_size(width: int, height: int) -> int:
+    """Bytes of one 4:2:0 frame without the FRAME line."""
+    return width * height + 2 * ((width + 1) // 2) * ((height + 1) // 2)
+
+
+def _pattern_planes(w: int, h: int) -> tuple[bytearray, bytearray, bytearray]:
+    cw, ch = (w + 1) // 2, (h + 1) // 2
+    bars = [rgb_to_ycbcr(*c) for c in PATTERN_BARS]
+    n = len(bars)
+    y_row = bytes(bars[x * n // w][0] for x in range(w))
+    u_row = bytes(bars[min(n - 1, (2 * x) * n // w)][1] for x in range(cw))
+    v_row = bytes(bars[min(n - 1, (2 * x) * n // w)][2] for x in range(cw))
+    Y = bytearray(y_row * h)
+    U = bytearray(u_row * ch)
+    V = bytearray(v_row * ch)
+
+    def put(x, y, luma):  # neutral (grey scale) pixel: luma plus neutral chroma
+        if 0 <= x < w and 0 <= y < h:
+            Y[y * w + x] = luma
+            U[(y // 2) * cw + x // 2] = 128
+            V[(y // 2) * cw + x // 2] = 128
+
+    # grid: mid grey lines, 2 px wide
+    for gx in range(0, w, GRID_STEP):
+        for y in range(h):
+            put(gx, y, 128)
+            put(gx + 1, y, 128)
+    for gy in range(0, h, GRID_STEP):
+        for x in range(w):
+            put(x, gy, 128)
+            put(x, gy + 1, 128)
+    # circle in the middle, black ring
+    cx, cy, rad = w / 2, h / 2, min(w, h) * 0.35
+    for y in range(h):
+        for x in range(w):
+            d = ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5
+            if abs(d - rad) < 2.0:
+                put(x, y, 0)
+    # both diagonals: white core with a black border
+    for x in range(w):
+        for yy in (x * (h - 1) // (w - 1), (h - 1) - x * (h - 1) // (w - 1)):
+            for dy in range(-3, 4):
+                put(x, yy + dy, 255 if abs(dy) <= 1 else 0)
+    return Y, U, V
+
+
+def write_test_pattern(path: Path, width: int = PATTERN_W, height: int = PATTERN_H, fps: int = PATTERN_FPS,
+                       frames: int = PATTERN_FRAMES) -> Path:
+    """Write a y4m (C420jpeg) test pattern: colour bars, grid, diagonals, a circle and a moving marker."""
+    Y, U, V = _pattern_planes(width, height)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    marker = 16
+    with open(path, "wb") as f:
+        f.write(f"YUV4MPEG2 W{width} H{height} F{fps}:1 Ip A1:1 C420jpeg\n".encode("ascii"))
+        for i in range(frames):
+            y = bytearray(Y)
+            # a small square running along the bottom edge shows the stream is live
+            x0 = (i * max(1, (width - marker) // max(1, frames - 1))) % max(1, width - marker)
+            for yy in range(max(0, height - marker - 4), max(0, height - 4)):
+                start = yy * width + x0
+                y[start:start + marker] = bytes([255 if (i % 2) else 0]) * min(marker, width - x0)
+            f.write(b"FRAME\n")
+            f.write(y)
+            f.write(U)
+            f.write(V)
+    return path
+
+
+# ================================================================ page error report
+
+PAGE_ERROR_RE = re.compile(r"^\S+ (log\.error|exception): ")
+
+
+def page_errors_from_lines(lines, page: str) -> list[str]:
+    """log.error and exception lines of one page log, without the time stamp, prefixed with the page."""
+    out = []
+    for line in lines:
+        line = line.rstrip("\n")
+        m = PAGE_ERROR_RE.match(line)
+        if m:
+            out.append(f"{page}: {line[m.start(1):]}")
+    return out
+
+
+def collect_page_errors(directory: Path) -> list[str]:
+    out = []
+    for p in sorted(Path(directory).glob("page-*.log")):
+        try:
+            with open(p, encoding="utf-8", errors="replace") as f:
+                out.extend(page_errors_from_lines(f, p.stem))
+        except OSError:
+            continue
+    return out
 
 
 FIND_JS = """(() => {
@@ -604,7 +735,7 @@ class ScenarioRunner:
         started = False
         if not setup_error:
             try:
-                self.console.api.start_step(step.index)
+                self.console.api.start_step(step.index, page_actions=bool(step.page))
                 started = True
             except (E2EError, OSError) as e:
                 errors.append(f"harness: start failed: {e}")
@@ -629,6 +760,11 @@ class ScenarioRunner:
                 except (E2EError, cdp.CDPError) as e:
                     errors.append(f"harness: action {i} ({action.get('do')}): {e}")
                     break
+        if started and step.page:
+            try:
+                self.console.api.page_done(step.index)
+            except (E2EError, OSError, ValueError) as e:
+                errors.append(f"harness: page-done failed: {e}")
         verdict = None
         if started:
             try:
@@ -657,12 +793,13 @@ def write_report(path: Path, mode: str, scenarios: list[dict]) -> dict:
 # ================================================================ browser session
 
 class Browser:
-    def __init__(self, chrome: str, out_dir: Path, headful: bool, keep: bool, log=print):
+    def __init__(self, chrome: str, out_dir: Path, headful: bool, keep: bool, log=print,
+                 camera_file: Path | None = None):
         self.profile = Path(tempfile.mkdtemp(prefix="iwyk-e2e-chrome-"))
         self.keep = keep
         self.log = log
         self._chrome_log = open(out_dir / "chrome.log", "wb")
-        self.proc, self.cdp = cdp.launch(chrome_args(chrome, self.profile, headful),
+        self.proc, self.cdp = cdp.launch(chrome_args(chrome, self.profile, headful, camera_file),
                                          stdout=self._chrome_log, stderr=self._chrome_log)
         self.cdp.send("Browser.getVersion", timeout=30)
         self.contexts: list[str] = []
@@ -756,7 +893,11 @@ def run(args, log=print) -> int:
     log(f"serving the {mode} page on {page_url}")
     binary = build_console(e2e_dir / "bin" / "mockconsole", log)
     chrome = find_chrome(args.chrome)
-    browser = Browser(chrome, out_root, args.headful, args.keep, log)
+    camera_file = None
+    if getattr(args, "camera", "pattern") == "pattern":
+        camera_file = write_test_pattern(out_root / "test-pattern.y4m")
+        log(f"fake camera: test pattern {_rel(camera_file)}")
+    browser = Browser(chrome, out_root, args.headful, args.keep, log, camera_file)
     results = []
     try:
         for sc in scenarios:
@@ -769,15 +910,22 @@ def run(args, log=print) -> int:
                 log(f"  mock console failed: {e}")
                 results.append({"name": sc.name, "pass": False, "steps": [
                     {"id": s.id, "pass": False, "errors": [f"harness: mock console failed: {e}"], "screenshot": None}
-                    for s in sc.steps]})
+                    for s in sc.steps], "page_errors": []})
                 continue
+            result = None
             try:
                 runner = ScenarioRunner(sc, console, lambda p, d=sdir: browser.open_page(d / f"page-{p}.log"),
                                         sdir, page_url, log)
-                results.append(runner.run())
+                result = runner.run()
             finally:
                 browser.close_contexts()
                 console.stop()
+            result["page_errors"] = collect_page_errors(sdir)
+            if result["page_errors"]:
+                log(f"  {len(result['page_errors'])} page console errors:")
+                for line in result["page_errors"]:
+                    log(f"         {line}")
+            results.append(result)
     finally:
         browser.close()
         server.shutdown()
@@ -786,8 +934,10 @@ def run(args, log=print) -> int:
     report = write_report(report_path, mode, results)
     total = sum(len(s["steps"]) for s in results)
     passed = sum(1 for s in results for st in s["steps"] if st["pass"])
+    page_errors = sum(len(s.get("page_errors") or []) for s in results)
     log(f"{passed}/{total} steps passed in {len(results)} scenarios ({mode}); report {_rel(report_path)}, "
         f"screenshots {_rel(out_root)}")
+    log(f"{page_errors} page console errors (listed per scenario as page_errors; not a failure)")
     return 0 if report["pass"] else 1
 
 
@@ -801,6 +951,8 @@ def main(argv=None) -> int:
     ap.add_argument("--loopback", action="store_true", help="advertise 127.0.0.1 instead of the LAN IPv4")
     ap.add_argument("--keep", action="store_true", help="keep the temporary Chrome profile")
     ap.add_argument("--out", help="folder for screenshots and logs (default work/e2e/<UTC stamp>)")
+    ap.add_argument("--camera", choices=("pattern", "default"), default="pattern",
+                    help="fake camera: our test pattern (default) or Chrome's built-in fake")
     args = ap.parse_args(argv)
     try:
         return run(args)
