@@ -145,17 +145,20 @@ public static class PortBuild
         // player quit with exit code 173 at startup. Off for this build only; the project setting
         // is put back afterwards so ProjectSettings.asset is left as it was.
         bool receipt = PlayerSettings.useMacAppStoreValidation;
+        bool background = PlayerSettings.runInBackground;
         AudioSettingsBackup audio = null;
         BuildReport report;
         try
         {
             PlayerSettings.useMacAppStoreValidation = false;
+            PlayerSettings.runInBackground = true; // phones keep talking while the window is unfocused
             audio = EnableAudio();
             report = BuildPipeline.BuildPlayer(options);
         }
         finally
         {
             PlayerSettings.useMacAppStoreValidation = receipt;
+            PlayerSettings.runInBackground = background;
             if (audio != null)
                 audio.Restore();
         }

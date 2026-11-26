@@ -61,6 +61,7 @@ namespace PortNet
         public void Start()
         {
             PortNetHost.StartEngine(m_engine);
+            PortJoinOverlay.Ensure();
         }
 
         public void ThreadFunc()
@@ -70,6 +71,7 @@ namespace PortNet
         public void Update(bool updateHeartbeats)
         {
             m_engine.Update(Time.deltaTime, Time.realtimeSinceStartup, updateHeartbeats);
+            PortJoinOverlay.Ensure(); // scene loads may destroy it
         }
 
         public void OnDestroy()

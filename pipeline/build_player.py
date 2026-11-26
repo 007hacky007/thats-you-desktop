@@ -116,6 +116,28 @@ def install_audio(work_dir: Path, project: Path, install=None, log=print) -> dic
     return r
 
 
+def install_native(work_dir: Path, project: Path, log=print) -> None:
+    """Build iwyknet (the phones' WebRTC endpoint) and install it into the project."""
+    from pipeline import build_native
+
+    out = work_dir / "native"
+    for plat in build_native.PLATFORMS:
+        r = build_native.build(plat, out)
+        log(f"native {plat}: {r['status']}")
+    build_native.install(out, project)
+
+
+def write_net_config(c, out_dir: Path, log=print) -> None:
+    """iwyk-net.json next to the app, with the page address from config/local.json."""
+    from pipeline import net_config
+
+    if not c.phone_page_url:
+        log("no phone_page_url in config/local.json: the game will show how to set it")
+        return
+    net_config.write(out_dir, c.phone_page_url)
+    log(f"wrote {out_dir / net_config.FILE_NAME}")
+
+
 def main(argv: list[str] | None = None) -> int:
     from pipeline import build_all, config
 
@@ -133,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     build_all.sync_port(build_all.PORT_DIR, project)
     install_audio(c.work_dir, project)
+    install_native(c.work_dir, project)
     log.parent.mkdir(parents=True, exist_ok=True)
     if log.exists():
         log.unlink()
@@ -144,6 +167,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"log: {log}")
     if rc == 0 and s["result"] not in (None, "Success", "Succeeded"):
         rc = 1
+    if rc == 0:
+        write_net_config(c, c.work_dir / "builds" / "mac")
     return rc
 
 

@@ -125,3 +125,29 @@ class InstallAudioTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NetConfigStepTest(unittest.TestCase):
+    def test_skips_without_page_url(self):
+        import tempfile
+        from types import SimpleNamespace
+        from pipeline.build_player import write_net_config
+        with tempfile.TemporaryDirectory() as d:
+            msgs = []
+            write_net_config(SimpleNamespace(phone_page_url=None), Path(d), log=msgs.append)
+            self.assertFalse((Path(d) / "iwyk-net.json").exists())
+            self.assertIn("phone_page_url", msgs[0])
+
+    def test_writes_page_url_next_to_app(self):
+        import json
+        from types import SimpleNamespace
+        from pipeline import config
+        from pipeline.build_player import write_net_config
+        out = config.REPO_ROOT / "work" / "test-net-config"
+        try:
+            write_net_config(SimpleNamespace(phone_page_url="https://example.invalid/iwyk/"), out, log=lambda m: None)
+            data = json.loads((out / "iwyk-net.json").read_text())
+            self.assertEqual(data["phone_page_url"], "https://example.invalid/iwyk/")
+        finally:
+            import shutil
+            shutil.rmtree(out, ignore_errors=True)

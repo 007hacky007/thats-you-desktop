@@ -81,6 +81,7 @@ namespace PortPad
         public static KeyCode[] Aliases(KeyCode key)
         {
             if (!Enabled) return null;
+            PortKeyHints.Ensure(); // the game's scene loads destroy it; the game polls input every frame
             int b = PadButton(key);
             return b < 0 ? null : s_ButtonKeys[b];
         }
