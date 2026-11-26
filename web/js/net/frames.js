@@ -43,7 +43,9 @@ export function byeFrame(reason) { return JSON.stringify({ t: 'bye', reason }); 
 //   { t: <unknown>, unknown: true }   (ignored by the caller, still counts as traffic)
 export function parseTextFrame(text) {
   if (typeof text !== 'string' || text.length === 0) return null;
-  if (text.length > MAX_TEXT && utf8Length(text) > MAX_TEXT) return null;
+  // UTF-8 is at least one byte per UTF-16 code unit and at most three.
+  if (text.length > MAX_TEXT) return null;
+  if (text.length * 3 > MAX_TEXT && utf8Length(text) > MAX_TEXT) return null;
   let o;
   try {
     o = JSON.parse(text);
@@ -115,6 +117,10 @@ export function decodeChunkHeader(frame) {
 //   { done: true, transferId, data }  when a transfer completed,
 //   { done: false }                   when more chunks are needed,
 //   { error: '<why>', transferId }    on a protocol error (that transfer is dropped).
+// A sender sends each transfer back to back, so a partial transfer that is
+// still open when maxPartial others exist is stale: when a new transfer
+// starts at the cap, the oldest partial is abandoned (logged) instead of
+// refusing every later transfer on the link.
 export function createReassembler({ log, maxPartial = MAX_PARTIAL } = {}) {
   const partial = new Map(); // id -> { total, got, buf }
 
@@ -136,7 +142,11 @@ export function createReassembler({ log, maxPartial = MAX_PARTIAL } = {}) {
     let st = partial.get(id);
     if (!st) {
       if (offset !== 0) return fail('offset gap', id);
-      if (partial.size >= maxPartial) return fail('too many partial transfers', id);
+      while (partial.size >= maxPartial) {
+        const oldest = partial.keys().next().value;
+        partial.delete(oldest);
+        if (log) log.warn('content: too many partial transfers, abandoned transfer ' + oldest);
+      }
       st = { total, got: 0, buf: new Uint8Array(total) };
       partial.set(id, st);
     }

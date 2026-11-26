@@ -37,6 +37,48 @@ test('parseTextFrame', () => {
   assert.equal(parseTextFrame('{"t":"ping","pad":"' + 'x'.repeat(65536) + '"}'), null);
 });
 
+test('text frame cap counts UTF-8 bytes, not UTF-16 units', () => {
+  // 3-byte characters: 21000 x U+20AC is 63000 bytes of payload
+  const fits = '{"t":"ping","pad":"' + '\u20ac'.repeat(21000) + '"}';
+  assert.ok(utf8Length(fits) <= 65536);
+  assert.deepEqual(parseTextFrame(fits), { t: 'ping' });
+  const over = '{"t":"ping","pad":"' + '\u20ac'.repeat(21840) + '"}';
+  assert.ok(over.length < 65536);
+  assert.ok(utf8Length(over) > 65536);
+  assert.equal(parseTextFrame(over), null);
+  const big = '{"t":"msg","id":-7503,"json":{"TypeString":"X","QuestionText":"' +
+    '\u20ac'.repeat(60000) + '"}}';
+  assert.equal(parseTextFrame(big), null);
+  // exactly at the cap with 2-byte characters
+  const head = '{"t":"ping","pad":"';
+  const tail = '"}';
+  const room = 65536 - head.length - tail.length;
+  const pad = room % 2 ? 'x' : '';
+  const exact = head + pad + '\u00e9'.repeat(Math.floor(room / 2)) + tail;
+  assert.equal(utf8Length(exact), 65536);
+  assert.deepEqual(parseTextFrame(exact), { t: 'ping' });
+  assert.equal(parseTextFrame(head + pad + '\u00e9'.repeat(Math.floor(room / 2)) + 'x' + tail), null);
+});
+
+test('reassembler abandons the oldest stale partial instead of locking out', () => {
+  const warns = [];
+  const r = createReassembler({ log: { warn: (m) => warns.push(m) } });
+  for (let id = 1; id <= 4; id++) assert.deepEqual(r.push(frame(id, 100, 0, 1)), { done: false });
+  assert.equal(r.partialCount, 4);
+  assert.deepEqual(r.push(frame(5, 100, 0, 1)), { done: false });
+  assert.equal(r.partialCount, 4);
+  assert.ok(warns.some((w) => w.includes('abandoned transfer 1')));
+  assert.equal(r.push(frame(1, 100, 1, 1)).error, 'offset gap');
+  // many more stuck transfers, then a good one still completes
+  for (let id = 10; id < 30; id++) r.push(frame(id, 100, 0, 1));
+  const ok = encodeChunks(99, bytes(40000));
+  let last;
+  for (const f of ok) last = r.push(f);
+  assert.equal(last.done, true);
+  assert.equal(last.data.length, 40000);
+  assert.ok(r.partialCount <= 4);
+});
+
 test('utf8Length counts bytes', () => {
   assert.equal(utf8Length('a\u00e9\u20ac'), 6);
 });
@@ -104,8 +146,6 @@ test('reassembler enforces every rule of 2.2', () => {
     ['offset gap', [frame(1, 100, 10, 10)]],
     ['offset gap', [frame(1, 100, 0, 10), frame(1, 100, 20, 10)]],
     ['total length changed', [frame(1, 100, 0, 10), frame(1, 200, 10, 10)]],
-    ['too many partial transfers', [frame(1, 100, 0, 1), frame(2, 100, 0, 1), frame(3, 100, 0, 1),
-      frame(4, 100, 0, 1), frame(5, 100, 0, 1)]],
   ];
   for (const [why, frames] of cases) {
     const r = createReassembler({ log });
