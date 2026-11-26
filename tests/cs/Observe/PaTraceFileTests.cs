@@ -5,6 +5,7 @@ using System.Threading;
 
 namespace PortAudio.Tests
 {
+    // PaTraceFile. Each [PaTest] method is one test; a failure throws.
     public static class PaTraceFileTests
     {
         static void Check(bool ok, string what)
@@ -23,6 +24,7 @@ namespace PortAudio.Tests
             return Path.Combine(dir, "sub", name);
         }
 
+        [PaTest]
         public static void LineFormat()
         {
             Same("{\"t\":1.234,\"f\":56,\"kind\":\"post\",\"id\":123,\"name\":\"Play_X\",\"ok\":true}",
@@ -30,6 +32,7 @@ namespace PortAudio.Tests
             Same("{\"t\":0,\"f\":0,\"kind\":\"k\"}", PaTraceFile.FormatLine(0, 0, "k", null));
         }
 
+        [PaTest]
         public static void ValueTypes()
         {
             Same("{\"t\":0,\"f\":0,\"kind\":\"v\",\"a\":-1.5,\"b\":null,\"c\":null,\"d\":18446744073709551615,\"e\":\"Linear\",\"g\":[1,\"x\",null],\"h\":0.25,\"z\":null}",
@@ -40,6 +43,7 @@ namespace PortAudio.Tests
 
         enum PaTestEnum { Log3, Linear }
 
+        [PaTest]
         public static void Escaping()
         {
             string ls = ((char)0x2028).ToString(), e = ((char)0xE9).ToString();
@@ -51,6 +55,7 @@ namespace PortAudio.Tests
             Same("\"x\\ud800y" + pair + "\"", sb.ToString());
         }
 
+        [PaTest]
         public static void WritesFlushesAndClosesTwice()
         {
             string path = TempFile("audio.jsonl");
@@ -70,6 +75,7 @@ namespace PortAudio.Tests
             Directory.Delete(Path.GetDirectoryName(Path.GetDirectoryName(path)), true);
         }
 
+        [PaTest]
         public static void BackgroundFlush()
         {
             string path = TempFile("bg.jsonl");
@@ -86,6 +92,7 @@ namespace PortAudio.Tests
             Directory.Delete(Path.GetDirectoryName(Path.GetDirectoryName(path)), true);
         }
 
+        [PaTest]
         public static void ManyThreads()
         {
             string path = TempFile("mt.jsonl");

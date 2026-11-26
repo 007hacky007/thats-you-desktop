@@ -4,7 +4,7 @@ using System.IO;
 
 namespace PortAudio.Tests
 {
-    // PaWavWriter and PaLevelMeter.
+    // PaWavWriter and PaLevelMeter. Each [PaTest] method is one test; a failure throws.
     public static class PaWavWriterTests
     {
         static void Check(bool ok, string what)
@@ -33,6 +33,7 @@ namespace PortAudio.Tests
             Check(b.Length >= 44 + dataBytes, "declared data exists");
         }
 
+        [PaTest]
         public static void EmptyFileIsValid()
         {
             var ms = new MemoryStream();
@@ -43,6 +44,7 @@ namespace PortAudio.Tests
             CheckHeader(ms.ToArray(), 48000, 2, 0);
         }
 
+        [PaTest]
         public static void HeaderPatchedEverySecondDuringPartialWrites()
         {
             var ms = new MemoryStream();
@@ -62,6 +64,7 @@ namespace PortAudio.Tests
             Near(2.1, w.Seconds, 1e-9, "seconds");
         }
 
+        [PaTest]
         public static void FileReadableWhileOpen()
         {
             string dir = Path.Combine(Path.GetTempPath(), "pa-wav-" + Guid.NewGuid().ToString("N"));
@@ -81,6 +84,7 @@ namespace PortAudio.Tests
             Directory.Delete(dir, true);
         }
 
+        [PaTest]
         public static void SampleConversionAndClipping()
         {
             var ms = new MemoryStream();
@@ -94,6 +98,7 @@ namespace PortAudio.Tests
             Check(w.Clipped == 2, "clipped count " + w.Clipped);
         }
 
+        [PaTest]
         public static void CloseDropsPartialFrame()
         {
             var ms = new MemoryStream();
@@ -105,6 +110,7 @@ namespace PortAudio.Tests
             Check(b.Length == 52, "partial frame trimmed");
         }
 
+        [PaTest]
         public static void MeterMath()
         {
             Check(PaLevelMeter.ToDb(0) == PaLevelMeter.SilentDb, "silence");

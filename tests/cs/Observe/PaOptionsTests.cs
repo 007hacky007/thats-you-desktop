@@ -4,7 +4,7 @@ using System.IO;
 
 namespace PortAudio.Tests
 {
-    // Each public static void method is one test; a failure throws.
+    // Each [PaTest] method is one test; a failure throws.
     public static class PaOptionsTests
     {
         static void Check(bool ok, string what)
@@ -12,6 +12,7 @@ namespace PortAudio.Tests
             if (!ok) throw new Exception("check failed: " + what);
         }
 
+        [PaTest]
         public static void Defaults()
         {
             var w = new List<string>();
@@ -23,6 +24,7 @@ namespace PortAudio.Tests
             Check(PaOptions.Parse(null, w) != null, "null args");
         }
 
+        [PaTest]
         public static void AllNineFlagsCaseInsensitive()
         {
             var w = new List<string>();
@@ -42,6 +44,7 @@ namespace PortAudio.Tests
             Check(s.Seed == 4294967295L, "seed");
         }
 
+        [PaTest]
         public static void BadValuesWarnAndKeepDefaults()
         {
             var w = new List<string>();
@@ -54,6 +57,7 @@ namespace PortAudio.Tests
             Check(s.RealVoices == 128, "voices 0 rejected");
         }
 
+        [PaTest]
         public static void MissingValueDoesNotSwallowNextFlag()
         {
             var w = new List<string>();
@@ -65,6 +69,7 @@ namespace PortAudio.Tests
             Check(w.Count == 3, "three warnings, got " + w.Count);
         }
 
+        [PaTest]
         public static void LastOccurrenceWins()
         {
             PaSettings s = PaOptions.Parse(new[] { "-portAudioVoices", "16", "-portAudioVoices", "32", "-portVoiceLanguage", " German " }, null);
