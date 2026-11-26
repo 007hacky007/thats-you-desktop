@@ -360,9 +360,7 @@
           "msg": "TrophyPhotoFXInfoMessage",
           "fields": {
             "ImageGUID": "$cap:portrait",
-            "usesFX": {
-              "type": "bool"
-            }
+            "usesFX": true
           }
         },
         {

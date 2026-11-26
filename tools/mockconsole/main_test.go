@@ -336,4 +336,23 @@ func TestProfileExercisesCameraEffects(t *testing.T) {
 	if next != 12 {
 		t.Errorf("effects exercised before the shutter: %d, want 12", next)
 	}
+	// the selfie is taken with effect 11 selected: the portrait must say so
+	found := false
+	for i := range sc.Steps {
+		if sc.Steps[i].ID != "confirm" {
+			continue
+		}
+		for _, m := range sc.Steps[i].Expect {
+			if m["msg"] == "TrophyPhotoFXInfoMessage" {
+				f, _ := m["fields"].(map[string]any)
+				if f["usesFX"] != true {
+					t.Errorf("confirm: usesFX must be true after effect 11, got %v", f["usesFX"])
+				}
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Error("confirm step does not check TrophyPhotoFXInfoMessage")
+	}
 }

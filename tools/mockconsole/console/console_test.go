@@ -438,13 +438,11 @@ func joinedPage(t *testing.T, c *Console, m *MemTransport) fakePage {
 
 func TestPageActionsStrictNoneWaitsForPageDone(t *testing.T) {
 	c, m := newConsole(t, pageActionsScenario)
-	a := joinedPage(t, c, m)
+	joinedPage(t, c, m)
 	if err := c.StartStepWith(1, StartOptions{PageActions: true}); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(100 * time.Millisecond)
-	a.msg(continueMsg) // a page action's message before page-done: not a violation
-	time.Sleep(400 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond) // longer than none_ms: quiet, but no page-done yet
 	if r, _ := c.Result(1, 0); r.Done {
 		t.Fatalf("finished before page-done: %+v", r)
 	}
@@ -468,14 +466,36 @@ func TestPageActionsStrictNoneWaitsForPageDone(t *testing.T) {
 	if _, err := c.PageDone(99); err == nil {
 		t.Error("page-done of a missing step")
 	}
+}
 
-	// activity after page-done is a violation
+// A message the page sends during its own page actions (before page-done)
+// is still a violation of an active none item.
+func TestPageActionsViolationBeforePageDone(t *testing.T) {
+	c, m := newConsole(t, pageActionsScenario)
+	a := joinedPage(t, c, m)
+	for _, step := range []int{1, 3} { // strict none, any-order none
+		if err := c.StartStepWith(step, StartOptions{PageActions: true}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(50 * time.Millisecond)
+		if step == 3 {
+			a.msg(continueMsg) // the expected message
+		}
+		a.msg(`{"TypeString":"StartGameButtonPressedResponseMessage","Response":9}`)
+		time.Sleep(50 * time.Millisecond)
+		c.PageDone(step)
+		r, _ := c.Result(step, 3*time.Second)
+		if r.Pass || !strings.Contains(strings.Join(r.Errors, "|"), "expected nothing") {
+			t.Errorf("step %d: message before page-done not a violation: %+v", step, r)
+		}
+	}
+	// activity after page-done is a violation too
 	c.StartStepWith(1, StartOptions{PageActions: true})
 	time.Sleep(50 * time.Millisecond)
 	c.PageDone(1)
 	time.Sleep(50 * time.Millisecond)
 	a.msg(continueMsg)
-	r, _ = c.Result(1, 3*time.Second)
+	r, _ := c.Result(1, 3*time.Second)
 	if r.Pass || !strings.Contains(strings.Join(r.Errors, "|"), "expected nothing") {
 		t.Errorf("violation after page-done: %+v", r)
 	}
@@ -495,6 +515,16 @@ func TestPageActionsMsgThenNone(t *testing.T) {
 	if r, _ := c.Result(2, 3*time.Second); !r.Pass {
 		t.Fatalf("%+v", r)
 	}
+	// a second message after the expected one, still during page actions
+	c.StartStepWith(2, StartOptions{PageActions: true})
+	time.Sleep(50 * time.Millisecond)
+	a.msg(continueMsg)
+	a.msg(continueMsg)
+	time.Sleep(50 * time.Millisecond)
+	c.PageDone(2)
+	if r, _ := c.Result(2, 3*time.Second); r.Pass {
+		t.Fatalf("duplicate during page actions passed: %+v", r)
+	}
 }
 
 func TestPageActionsAnyOrder(t *testing.T) {
@@ -503,7 +533,6 @@ func TestPageActionsAnyOrder(t *testing.T) {
 	c.StartStepWith(3, StartOptions{PageActions: true})
 	time.Sleep(50 * time.Millisecond)
 	a.msg(continueMsg)
-	a.msg(`{"TypeString":"StartGameButtonPressedResponseMessage","Response":9}`) // unmatched, before page-done
 	time.Sleep(400 * time.Millisecond)
 	if r, _ := c.Result(3, 0); r.Done {
 		t.Fatalf("finished before page-done: %+v", r)
@@ -512,33 +541,42 @@ func TestPageActionsAnyOrder(t *testing.T) {
 	if r, _ := c.Result(3, 3*time.Second); !r.Pass {
 		t.Fatalf("%+v", r)
 	}
-	// without the flag the window starts at once and the same traffic fails
+	// without the flag the window starts at once and the step ends on its own
+	t0 := time.Now()
 	c.StartStep(3)
 	time.Sleep(50 * time.Millisecond)
 	a.msg(continueMsg)
-	a.msg(`{"TypeString":"StartGameButtonPressedResponseMessage","Response":9}`)
-	if r, _ := c.Result(3, 3*time.Second); r.Pass {
-		t.Fatalf("unflagged run passed: %+v", r)
+	if r, _ := c.Result(3, 3*time.Second); !r.Pass {
+		t.Fatalf("unflagged run: %+v", r)
+	}
+	if d := time.Since(t0); d > 1500*time.Millisecond {
+		t.Errorf("unflagged run took %v", d)
 	}
 }
 
-func TestPageActionsTimeoutStartsNone(t *testing.T) {
+// Without page-done the step fails at its timeout, even when it was quiet.
+func TestPageActionsNoPageDoneFails(t *testing.T) {
 	c, m := newConsole(t, pageActionsScenario)
 	joinedPage(t, c, m)
 	t0 := time.Now()
 	c.StartStepWith(4, StartOptions{PageActions: true})
 	r, _ := c.Result(4, 3*time.Second)
-	if !r.Pass {
+	if r.Pass || !strings.Contains(strings.Join(r.Errors, "|"), "page-done never arrived") {
 		t.Fatalf("%+v", r)
 	}
-	if d := time.Since(t0); d < 480*time.Millisecond {
-		t.Errorf("finished after %v, want timeout 300 + none 200", d)
+	if d := time.Since(t0); d < 280*time.Millisecond {
+		t.Errorf("finished after %v, want the 300 ms timeout", d)
+	}
+	// unflagged, the same quiet step passes
+	c.StartStep(4)
+	if r, _ := c.Result(4, 3*time.Second); !r.Pass {
+		t.Fatalf("unflagged: %+v", r)
 	}
 }
 
 func TestHTTPPageActions(t *testing.T) {
 	c, m := newConsole(t, pageActionsScenario)
-	a := joinedPage(t, c, m)
+	joinedPage(t, c, m)
 	srv := httptest.NewServer(c.Handler(t.TempDir()))
 	defer srv.Close()
 	var out map[string]any
@@ -554,8 +592,6 @@ func TestHTTPPageActions(t *testing.T) {
 	if code := postJSON(t, srv.URL+"/api/steps/1/start", `{"page_actions":true}`, &out); code != 200 {
 		t.Fatalf("start %d %v", code, out)
 	}
-	time.Sleep(50 * time.Millisecond)
-	a.msg(continueMsg)
 	time.Sleep(400 * time.Millisecond)
 	var res StepResult
 	getJSON(t, srv.URL+"/api/steps/1/result", &res)
