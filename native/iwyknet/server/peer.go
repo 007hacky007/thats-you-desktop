@@ -36,6 +36,7 @@ type peer struct {
 	closeReason int32
 	closeDetail string
 	timers      []*time.Timer
+	srcIP       string
 	closedCh    chan struct{} // closed when the connection is torn down
 
 	addrList []string // guarded by s.mu

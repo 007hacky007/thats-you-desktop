@@ -24,11 +24,12 @@ type Config struct {
 	LogLevel     int           // IWYK_LOG_* values
 
 	// Not part of the C ABI; zero values give the contract defaults.
-	StunTimeout    time.Duration // pending peer without a hello; 0 = 30s
-	CloseFlush     time.Duration // graceful Close flush; 0 = 2s
-	StopFlush      time.Duration // Stop flush; 0 = 500ms
-	QueueMaxBytes  int           // 0 = 64 MiB
-	QueueMaxEvents int           // 0 = 100000
+	StunTimeout     time.Duration // pending peer without a hello; 0 = 15s
+	CloseFlush      time.Duration // graceful Close flush; 0 = 2s
+	StopFlush       time.Duration // Stop flush; 0 = 500ms
+	QueueMaxBytes   int           // 0 = 64 MiB
+	QueueMaxEvents  int           // 0 = 100000
+	MaxPendingPerIP int           // pending peers per source IP; 0 = 4
 }
 
 // sessionCounter makes session ids unique for the process lifetime.
@@ -55,6 +56,7 @@ type Server struct {
 	byAddr   map[string]*peer
 	sessions map[int32]*peer
 	pending  int
+	pendIP   map[string]int // pending peers per source IP
 }
 
 // Start binds the UDP port and starts serving.
@@ -83,11 +85,14 @@ func Start(cfg Config) (*Server, error) {
 	}
 	def(&cfg.PingInterval, 2*time.Second)
 	def(&cfg.HelloTimeout, 10*time.Second)
-	def(&cfg.StunTimeout, 30*time.Second)
+	def(&cfg.StunTimeout, 15*time.Second)
 	def(&cfg.CloseFlush, 2*time.Second)
 	def(&cfg.StopFlush, 500*time.Millisecond)
 	if cfg.QueueMaxBytes <= 0 {
 		cfg.QueueMaxBytes = QueueMaxBytes
+	}
+	if cfg.MaxPendingPerIP <= 0 {
+		cfg.MaxPendingPerIP = 4
 	}
 	if cfg.QueueMaxEvents <= 0 {
 		cfg.QueueMaxEvents = QueueMaxEvents
@@ -100,6 +105,7 @@ func Start(cfg Config) (*Server, error) {
 		byUfrag:  map[string]*peer{},
 		byAddr:   map[string]*peer{},
 		sessions: map[int32]*peer{},
+		pendIP:   map[string]int{},
 	}
 	s.logLevel.Store(int32(cfg.LogLevel))
 
@@ -372,6 +378,11 @@ func (s *Server) stunRemoteUfrag(b []byte) (string, bool) {
 	if !ok || local != s.ufrag || remote == "" || len(remote) > 256 {
 		return "", false
 	}
+	// Only a phone that knows the ICE password from the QR code may create a
+	// peer or move an address (checked before any state changes).
+	if stun.NewShortTermIntegrity(s.pwd).Check(m) != nil {
+		return "", false
+	}
 	return remote, true
 }
 
@@ -384,18 +395,27 @@ func (s *Server) peerForUfrag(remote string, addr net.Addr) *peer {
 	if s.stopped {
 		return nil
 	}
+	old := s.byAddr[key]
 	if p := s.byUfrag[remote]; p != nil {
-		if old := s.byAddr[key]; old != p {
+		if old == nil {
 			s.byAddr[key] = p
 			p.addrList = append(p.addrList, key)
+		} else if old != p {
+			return nil // never take an address away from another peer
 		}
 		return p
 	}
-	if s.pending >= MaxPending {
+	if old != nil {
+		return nil
+	}
+	ip := hostOf(addr)
+	if s.pending >= MaxPending || s.pendIP[ip] >= s.cfg.MaxPendingPerIP {
 		return nil
 	}
 	p := newPeer(s, remote, addr)
+	p.srcIP = ip
 	s.pending++
+	s.pendIP[ip]++
 	s.byUfrag[remote] = p
 	s.byAddr[key] = p
 	p.addrList = append(p.addrList, key)
@@ -413,7 +433,7 @@ func (s *Server) authenticate(p *peer) int32 {
 	}
 	id := sessionCounter.Add(1)
 	s.sessions[id] = p
-	s.pending--
+	s.unpend(p)
 	return id
 }
 
@@ -423,7 +443,7 @@ func (s *Server) removePeer(p *peer, session int32) {
 	if s.byUfrag[p.remoteUfrag] == p {
 		delete(s.byUfrag, p.remoteUfrag)
 		if session == 0 {
-			s.pending--
+			s.unpend(p)
 		}
 	}
 	for _, k := range p.addrList {
@@ -434,4 +454,20 @@ func (s *Server) removePeer(p *peer, session int32) {
 	if session != 0 && s.sessions[session] == p {
 		delete(s.sessions, session)
 	}
+}
+
+// unpend drops p from the pending counters (caller holds s.mu).
+func (s *Server) unpend(p *peer) {
+	s.pending--
+	if s.pendIP[p.srcIP]--; s.pendIP[p.srcIP] <= 0 {
+		delete(s.pendIP, p.srcIP)
+	}
+}
+
+func hostOf(a net.Addr) string {
+	if u, ok := a.(*net.UDPAddr); ok {
+		return u.IP.String()
+	}
+	h, _, _ := net.SplitHostPort(a.String())
+	return h
 }
