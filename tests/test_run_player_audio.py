@@ -63,7 +63,7 @@ class AudioArgvTest(unittest.TestCase):
 class ParseAudioEventsTest(unittest.TestCase):
     def test_robust_to_bad_lines(self):
         text = "\n".join([
-            '{"t":0.1,"f":1,"kind":"post","id":1,"name":"Play_A"}',
+            '{"t":0.1,"f":1,"kind":"post","id":1,"name":"Play_A","result":"ok"}',
             "not json",
             "[1,2]",
             '{"t":0.2,"f":2}',
@@ -82,7 +82,77 @@ class ParseAudioEventsTest(unittest.TestCase):
         self.assertEqual(a["posted"]["Play_A"], 1)
         self.assertEqual(a["posted"]["?"], 1)
 
-    def test_counts_and_levels(self):
+    def test_real_shapes(self):
+        lines = [{"kind": "post", "id": 5, "name": "Play_X", "result": "ok", "playingId": 3}] * 3
+        lines += [{"kind": "post", "id": 9, "name": "Play_Missing", "result": "unknown", "playingId": 0}] * 4
+        lines += [{"kind": "post", "id": 10, "result": "unknown"}]
+        lines += [{"kind": "post", "id": 11, "name": "Play_Quiet", "result": "silent"}] * 2
+        lines += [{"kind": "voice", "op": "start", "media": 1, "file": "media/1.ogg"}] * 2
+        lines += [{"kind": "voice", "op": "late", "media": 1, "lateMs": 300}]
+        lines += [{"kind": "voice", "op": "clamp", "gainDb": 30}, {"kind": "voice", "op": "steal"}]
+        lines += [{"kind": "voice", "op": "end", "reason": "Finished"}] * 3
+        lines += [{"kind": "voice", "op": "stop", "reason": "Stopped"}]
+        lines += [{"kind": "voice", "op": "fail", "reason": "NoMedia", "media": 0, "file": None}] * 2
+        lines += [{"kind": "voice", "op": "fail", "reason": "LoadFailed", "media": 77, "file": None}]
+        lines += [{"kind": "voice", "op": "fail", "reason": "LoadFailed", "media": 1, "file": "media/1.ogg"}]
+        lines += [{"kind": "bank", "op": "load", "name": "Init", "id": 1, "result": 1}] * 2
+        lines += [{"kind": "bank", "op": "loadAsync", "name": "B", "result": 1},
+                  {"kind": "bank", "op": "ready", "name": "B", "result": 1},
+                  {"kind": "bank", "op": "unload", "name": "B", "result": 1}]
+        lines += [{"kind": "callback", "type": "endOfEvent", "playingId": 3}] * 4
+        lines += [{"kind": "callback", "type": "bank", "bankId": 2, "result": 1}]
+        lines += [{"kind": "music", "op": "play"}, {"kind": "music", "op": "segment"},
+                  {"kind": "music", "op": "segment"}, {"kind": "music", "op": "transition"},
+                  {"kind": "music", "op": "stinger"}]
+        lines += [{"kind": "warn", "msg": "w1"}]
+        a = run_player.parse_audio_events("\n".join(json.dumps(x) for x in lines))
+        self.assertEqual(sum(a["posted"].values()), 10)
+        self.assertEqual(a["resolved"]["Play_X"], 3)
+        self.assertEqual(a["unknown"].most_common(1)[0], ("Play_Missing", 4))
+        self.assertEqual(a["unknown"]["10"], 1)
+        self.assertEqual(a["silent"]["Play_Quiet"], 2)
+        self.assertEqual(a["voices"]["start"], 2)
+        self.assertEqual(a["voices"]["late"], 1)
+        self.assertEqual(a["failed"]["NoMedia ?"], 2)
+        self.assertEqual(a["failed"]["LoadFailed media 77"], 1)
+        self.assertEqual(a["failed"]["LoadFailed media/1.ogg"], 1)
+        self.assertEqual(a["banks"]["Init load 1"], 2)
+        self.assertEqual(a["banks"]["B ready 1"], 1)
+        self.assertEqual(a["callbacks"]["endOfEvent"], 4)
+        self.assertEqual(a["music"]["segment"], 2)
+        out = "\n".join(run_player.audio_summary(a, None))
+        self.assertIn("posted 10 (4 distinct), resolved 3, unknown 5 (2 distinct), silent 2", out)
+        self.assertIn("(x4) Play_Missing", out)
+        self.assertIn("voices: start 2, end 3, stop 1, fail 4, late 1, steal 1, clamp 1", out)
+        self.assertIn("(x2) NoMedia ?", out)
+        self.assertIn("(x2) Init load 1", out)
+        self.assertIn("callbacks: endOfEvent 4, bank 1", out)
+        self.assertIn("music: play 1, segment 2, transition 1, late 0, stinger 1", out)
+        self.assertIn("WARNING: 5 posted events unknown", out)
+        self.assertNotIn("not ready", out)
+
+    def test_real_run_line_counts(self):
+        # the shape of a real title screen run: 31 posts all ok and 34 voice starts
+        lines = [{"kind": "post", "name": "Play_%d" % (i % 7), "result": "ok"} for i in range(31)]
+        lines += [{"kind": "voice", "op": "start", "file": "media/%d.ogg" % i} for i in range(34)]
+        out = "\n".join(run_player.audio_summary(
+            run_player.parse_audio_events("\n".join(json.dumps(x) for x in lines)), None))
+        self.assertIn("posted 31 (7 distinct), resolved 31, unknown 0 (0 distinct), silent 0", out)
+        self.assertIn("voices: start 34, end 0, stop 0, fail 0, late 0", out)
+        self.assertNotIn("WARNING", out)
+
+    def test_warns_on_media_not_ready(self):
+        lines = [{"kind": "post", "name": "Play_X", "result": "ok"},
+                 {"kind": "warn", "msg": "bank X: media not ready after 5 s; reporting it loaded"},
+                 {"kind": "warn", "msg": "bank Y: media not ready after 5 s; reporting it loaded"}]
+        a = run_player.parse_audio_events("\n".join(json.dumps(x) for x in lines))
+        self.assertEqual(len(a["not_ready"]), 2)
+        out = "\n".join(run_player.audio_summary(a, None))
+        self.assertIn("WARNING: 2 banks reported loaded with media not ready", out)
+        self.assertIn("bank X: media not ready after 5 s", out)
+        self.assertNotIn("posted events unknown", out)
+
+    def test_old_kinds_still_counted(self):
         lines = [{"kind": "post", "id": 5, "name": "Play_X"}] * 3
         lines += [{"kind": "resolve", "name": "Play_X"}] * 2
         lines += [{"kind": "unknown", "name": "Play_Missing", "id": 9}] * 4
@@ -90,7 +160,7 @@ class ParseAudioEventsTest(unittest.TestCase):
         lines += [{"kind": "start", "playingId": 1}, {"kind": "start", "playingId": 2}]
         lines += [{"kind": "end", "reason": "Finished"}, {"kind": "stop", "reason": "Stopped"}]
         lines += [{"kind": "fail", "reason": "LoadFailed", "file": "media/1.ogg"}]
-        lines += [{"kind": "bank", "name": "Frontend", "result": 1}, {"kind": "warn", "msg": "w1"}]
+        lines += [{"kind": "bank", "name": "Frontend", "status": "ok"}, {"kind": "warn", "msg": "w1"}]
         lines += [{"kind": "level", "sec": 0, "rmsDb": -20.0, "peakDb": -3.0},
                   {"kind": "level", "sec": 1, "rmsDb": -90.0, "peakDb": -80.0},
                   {"kind": "level", "sec": 2, "rmsDb": "bad"}]
@@ -100,6 +170,7 @@ class ParseAudioEventsTest(unittest.TestCase):
         self.assertEqual(a["unknown"].most_common(1)[0], ("Play_Missing", 4))
         self.assertEqual(a["unknown"]["10"], 1)
         self.assertEqual(a["failed"]["LoadFailed media/1.ogg"], 1)
+        self.assertEqual(a["banks"]["Frontend ok"], 1)
         self.assertEqual(len(a["levels"]), 2)
         out = "\n".join(run_player.audio_summary(a, None))
         self.assertIn("posted 3 (1 distinct)", out)
@@ -108,6 +179,7 @@ class ParseAudioEventsTest(unittest.TestCase):
         self.assertIn("voices: start 2, end 1, stop 1, fail 1", out)
         self.assertIn("audible 1 of 2 s", out)
         self.assertIn("peak -3.0 dBFS", out)
+        self.assertIn("WARNING: 5 posted events unknown", out)
 
 
 class AnalyzeWavTest(unittest.TestCase):
@@ -179,11 +251,12 @@ class ReportAudioTest(unittest.TestCase):
     def test_report_has_audio_section_when_trace_present(self):
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp)
-            (run_dir / "audio.jsonl").write_text('{"t":1,"f":1,"kind":"post","name":"Play_A"}\n')
+            (run_dir / "audio.jsonl").write_text('{"t":1,"f":1,"kind":"post","name":"Play_A","result":"ok"}\n')
             write_wav(run_dir / "mix.wav", tone(1.0))
             out = run_player.report(run_dir, 0, audio_trace=True, audio_record=True)
             self.assertIn("audio:", out)
             self.assertIn("posted 1", out)
+            self.assertIn("resolved 1", out)
             self.assertIn("mix:", out)
 
     def test_report_without_audio(self):

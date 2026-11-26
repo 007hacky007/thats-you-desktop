@@ -447,11 +447,34 @@ def _label(e: dict, *keys: str) -> str:
     return "?"
 
 
+VOICE_OPS = ("start", "end", "stop", "fail", "late", "steal", "clamp")
+CALLBACK_TYPES = ("endOfEvent", "bank")
+MUSIC_OPS = ("play", "segment", "transition", "late")
+NOT_READY = "not ready after"
+
+
+def _fail_target(e: dict) -> str:
+    """What a failed voice tried to play: the file, else a non-zero media id, else node/name/id."""
+    f = e.get("file")
+    if f is not None and f != "":
+        return str(f)
+    m = e.get("media")
+    if m is not None and m != "" and m != 0:
+        return f"media {m}"
+    return _label(e, "node", "name", "id")
+
+
 def parse_audio_events(text: str) -> dict:
     """Read PortAudio's audio.jsonl. Bad lines (not a JSON object, e.g. the truncated last line of a
-    killed player) are counted, never fatal; missing fields fall back to '?'."""
-    kinds, posted, resolved, unknown = Counter(), Counter(), Counter(), Counter()
+    killed player) are counted, never fatal; missing fields fall back to '?'.
+
+    Current shapes: post (result ok|unknown|silent), voice (op start|end|stop|fail|late|clamp|steal),
+    bank (op load|loadAsync|ready|unload, result), callback (type endOfEvent|bank), music (op).
+    The older kinds resolve/unknown/start/end/stop/fail and bank `status` are still accepted."""
+    kinds, posted, resolved, unknown, silent = Counter(), Counter(), Counter(), Counter(), Counter()
     failed, banks, problems = Counter(), Counter(), Counter()
+    voices, callbacks, music = Counter(), Counter(), Counter()
+    not_ready: list[str] = []
     levels: list[dict] = []
     lines = bad = 0
     last_t = None
@@ -473,26 +496,55 @@ def parse_audio_events(text: str) -> dict:
         if t is not None:
             last_t = t
         if kind == "post":
-            posted[_label(e, "name", "id")] += 1
+            name = _label(e, "name", "id")
+            posted[name] += 1
+            result = e.get("result")
+            if result == "ok":
+                resolved[name] += 1
+            elif result == "unknown":
+                unknown[name] += 1
+            elif result == "silent":
+                silent[name] += 1
         elif kind == "resolve":
             resolved[_label(e, "name", "id")] += 1
         elif kind == "unknown":
             unknown[_label(e, "name", "id")] += 1
-        elif kind == "fail":
-            what = _label(e, "file", "media", "node", "name", "id")
-            failed[f"{_label(e, 'reason', 'error')} {what}"] += 1
+        elif kind in ("voice", "start", "end", "stop", "fail"):
+            op = _label(e, "op") if kind == "voice" else kind
+            voices[op] += 1
+            if op == "fail":
+                failed[f"{_label(e, 'reason', 'error')} {_fail_target(e)}"] += 1
         elif kind == "bank":
-            banks[f"{_label(e, 'name', 'id')} {_label(e, 'status', 'result')}"] += 1
+            key = [_label(e, "name", "id")]
+            if e.get("op") is not None and e.get("op") != "":
+                key.append(str(e["op"]))
+            key.append(_label(e, "result", "status"))
+            banks[" ".join(key)] += 1
+        elif kind == "callback":
+            callbacks[_label(e, "type")] += 1
+        elif kind == "music":
+            music[_label(e, "op")] += 1
         elif kind in ("warn", "error"):
-            problems[f"[{kind}] {str(e.get('msg', '?')).splitlines()[0][:300] if e.get('msg') else '?'}"] += 1
+            msg = str(e.get("msg", "?")).splitlines()[0][:300] if e.get("msg") else "?"
+            problems[f"[{kind}] {msg}"] += 1
+            if NOT_READY in msg:
+                not_ready.append(msg)
         elif kind == "level":
             rms, peak = _num(e.get("rmsDb")), _num(e.get("peakDb"))
             if rms is not None:
                 levels.append({"sec": _num(e.get("sec")), "rmsDb": rms,
                                "peakDb": peak if peak is not None else rms})
     return {"lines": lines, "bad": bad, "kinds": kinds, "posted": posted, "resolved": resolved,
-            "unknown": unknown, "failed": failed, "banks": banks, "problems": problems,
+            "unknown": unknown, "silent": silent, "voices": voices, "failed": failed, "banks": banks,
+            "callbacks": callbacks, "music": music, "problems": problems, "not_ready": not_ready,
             "levels": levels, "last_t": last_t}
+
+
+def _ops(counter: Counter, fixed: tuple[str, ...], optional: tuple[str, ...] = ()) -> str:
+    """'a 1, b 0, ...': the fixed names always, the optional ones and any others only when seen."""
+    names = list(fixed) + [n for n in optional if counter.get(n)]
+    names += sorted(n for n in counter if n not in names)
+    return ", ".join(f"{n} {counter.get(n, 0)}" for n in names)
 
 
 def _db(x: float) -> float:
@@ -580,19 +632,29 @@ def audio_summary(events: dict | None, wav: dict | None, *, trace_path: Path | N
                    + (f", last t={events['last_t']:.2f}" if events.get("last_t") is not None else ""))
         out.append("  kinds: " + (", ".join(f"{n}={c}" for n, c in sorted(k.items())) or "none"))
         p, r, u = events["posted"], events["resolved"], events["unknown"]
+        sil = events.get("silent", Counter())
         out.append(f"  events: posted {sum(p.values())} ({len(p)} distinct), resolved {sum(r.values())}, "
-                   f"unknown {sum(u.values())} ({len(u)} distinct)")
+                   f"unknown {sum(u.values())} ({len(u)} distinct), silent {sum(sil.values())}")
         if u:
+            out.append(f"  WARNING: {sum(u.values())} posted events unknown (in no loaded bank)")
             out.append("  top unknown events:")
             out += _top(u, top)
-        out.append(f"  voices: start {k.get('start', 0)}, end {k.get('end', 0)}, stop {k.get('stop', 0)}, "
-                   f"fail {k.get('fail', 0)}")
+        out.append("  voices: " + _ops(events.get("voices", Counter()), VOICE_OPS[:5], VOICE_OPS[5:]))
         if events["failed"]:
             out.append("  top voice failures:")
             out += _top(events["failed"], top)
+        cb, mu = events.get("callbacks", Counter()), events.get("music", Counter())
+        if cb:
+            out.append("  callbacks: " + _ops(cb, CALLBACK_TYPES))
+        if mu:
+            out.append("  music: " + _ops(mu, MUSIC_OPS))
         if events["banks"]:
             out.append(f"  banks ({sum(events['banks'].values())}):")
             out += _top(events["banks"], top)
+        nr = events.get("not_ready", [])
+        if nr:
+            out.append(f"  WARNING: {len(nr)} banks reported loaded with media not ready:")
+            out += _top(Counter(nr), top)
         if events["problems"]:
             out.append(f"  warnings/errors: {len(events['problems'])} distinct, "
                        f"{sum(events['problems'].values())} total")

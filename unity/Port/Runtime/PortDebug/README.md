@@ -236,22 +236,21 @@ The rest go through `--extra`, for example `--extra '-portAudioSeed 7 -portAudio
 
 `t` is realtime seconds since startup and `f` the frame count (`PaRuntime.Platform`); off the main thread `t` is extrapolated from the last main-thread reading and `f` is that reading's frame. NaN and infinities are written as `null`. More than 200000 pending lines are dropped and reported as one `traceDropped` line with a `count`.
 
-Kinds the run summary reads (other kinds are counted by name):
+Kinds the run summary reads (other kinds, such as `action`, `play`, `seek`, `sync`, `stats`, `init`, are counted by name only):
 
 | Kind | Emitted when | Fields read by the summary |
 | --- | --- | --- |
-| `post` | the game posts an event | `name` (else `id`) |
-| `resolve` | a posted event was found in a loaded bank and its actions ran | `name` (else `id`) |
-| `unknown` | a posted event is in no loaded bank (or the id is unknown) | `name` (else `id`) |
-| `start` | a voice (clip) started playing | - |
-| `stop` | a voice was stopped by an action or a fade | `reason` |
-| `end` | a voice ended | `reason` (`Finished`, `Stolen`, ...) |
-| `fail` | a voice could not play (`LoadFailed`, `NoMedia`) | `reason` (or `error`), `file` (else `media`, `node`, `name`, `id`) |
-| `bank` | a bank load or unload | `name` (else `id`), `status` (else `result`) |
-| `warn`, `error` | every `PaLog.Warn` / `PaLog.Error` | `msg` |
+| `post` | the game posts an event | `name` (else `id`), `result`: `ok` (found in a loaded bank, its actions ran; counted as resolved), `unknown` (in no loaded bank, or the id is unknown), `silent` (PortAudio runs in silent mode) |
+| `voice` | a voice (clip) changes state | `op`: `start`, `end`, `stop`, `fail`, `late` (started 50 ms or more after it was due), `steal` (stopped to free a real voice), `clamp` (gain clamped); for `fail` also `reason`, `file` (else a non-zero `media`, `node`, `name`, `id`) |
+| `bank` | a bank load or unload | `name` (else `id`), `op` (`load`, `loadAsync`, `ready`, `unload`), `result` |
+| `callback` | a callback was sent to the game | `type`: `endOfEvent` or `bank` |
+| `music` | the interactive music player acts | `op`: `play`, `segment`, `transition`, `late`, `stinger`, `end`, `stop` |
+| `warn`, `error` | every `PaLog.Warn` / `PaLog.Error` | `msg` (a message containing `not ready after` gets a WARNING line) |
 | `level` | the recorder finished one second of the mix | `sec`, `rmsDb`, `peakDb`, `frames` |
 | `record` | recorder status: `start`, `listener` (tap moved, `name`, `scene`), `data` (first audio, `channels`, `rate`), `stop` / `noData` (`seconds`, `callbacks`, `overruns`, `mismatched`, `clipped`, `error`) | - |
 | `traceDropped` | the queue overflowed | `count` |
+
+For older traces the summary still accepts the kinds `resolve`, `unknown`, `start`, `end`, `stop` and `fail` and a bank `status` field.
 
 ### Recorder
 
@@ -264,4 +263,4 @@ Kinds the run summary reads (other kinds are counted by name):
 
 ### Run summary
 
-With `--audio-trace` or `--audio-record` (or when `audio.jsonl` / `mix.wav` exist in the run folder), the `run_player` summary ends with an `audio:` section: trace event counts per kind, events posted / resolved / unknown with the most frequent unknown names, voice start / end / stop / fail counts with the top failures, bank results, PortAudio warnings and errors, audible seconds from the `level` events, and an analysis of `mix.wav`: duration, rate, channels, peak dBFS, audible seconds (0.1 s windows with RMS above -50 dBFS) and the longest silence with its start. A requested trace or recording that is missing, unreadable, empty or silent gets a WARNING line.
+With `--audio-trace` or `--audio-record` (or when `audio.jsonl` / `mix.wav` exist in the run folder), the `run_player` summary ends with an `audio:` section: trace event counts per kind, events posted / resolved / unknown / silent with the most frequent unknown names, voice start / end / stop / fail / late counts (steal and clamp when seen) with the top failures by file or media, callback counts (`endOfEvent`, `bank`), music op counts (`play`, `segment`, `transition`, `late`), bank results by name, op and result, PortAudio warnings and errors, audible seconds from the `level` events, and an analysis of `mix.wav`: duration, rate, channels, peak dBFS, audible seconds (0.1 s windows with RMS above -50 dBFS) and the longest silence with its start. A requested trace or recording that is missing, unreadable, empty or silent gets a WARNING line, and so do unknown posted events and banks whose media was `not ready after` the preload wait.
