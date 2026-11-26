@@ -100,6 +100,43 @@ namespace PortAudio
             return at;
         }
 
+        // Earliest sync point for a rule. For grid and marker syncs the search starts late enough that the
+        // source fade-out (which ends at the sync) fits after `now`; immediate and exit syncs are not moved
+        // and clamp the fade start instead (SourceFadeStart).
+        public static double EarliestSync(PaTransitionSrc src, double t, double now)
+        {
+            if (src == null || src.FadeMs <= 0 || src.FadeOffsetMs <= 0)
+                return t;
+            switch (src.Sync)
+            {
+                case "nextGrid":
+                case "nextBar":
+                case "nextBeat":
+                case "nextMarker":
+                case "nextUserMarker":
+                    return Math.Max(t, now + src.FadeOffsetMs / 1000.0);
+                default:
+                    return t;
+            }
+        }
+
+        // Source fade-out start. A positive offset is time before the sync point, so offset == fade time
+        // (the authoring default, and every faded source rule in the banks) ends the fade at the sync.
+        // A start in the past is clamped to `now` and keeps the full fade length.
+        public static double SourceFadeStart(PaTransitionSrc src, double sync, double now)
+        {
+            double at = sync - (src != null ? src.FadeOffsetMs : 0) / 1000.0;
+            return at < now ? now : at;
+        }
+
+        // Destination fade-in start. A positive offset is time before the sync point; the fade never
+        // starts before the destination can sound (`earliest`), so it is always heard in full.
+        public static double DestinationFadeStart(PaTransitionDst dst, double sync, double earliest)
+        {
+            double at = sync - (dst != null ? dst.FadeOffsetMs : 0) / 1000.0;
+            return at < earliest ? earliest : at;
+        }
+
         // Where the destination segment starts: T0 for a destination that begins sounding at `sync`.
         // srcOffset is the source position after its entry at the sync point (for sameTime).
         public static double DestinationT0(PaTransitionDst dst, PaSegmentInfo d, double sync, double srcOffset, PaRandom random)

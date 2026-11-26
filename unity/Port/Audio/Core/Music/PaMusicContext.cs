@@ -414,10 +414,11 @@ namespace PortAudio
                 next.Placed = true;
                 next.CutBefore = next.PlayPreEntry ? double.NegativeInfinity : next.EntryAbs;
                 if (rule != null && rule.SrcRule != null && rule.SrcRule.FadeMs > 0)
-                    ApplyFadeOut(last, last.ExitAbs + rule.SrcRule.FadeOffsetMs / 1000.0, rule.SrcRule.FadeMs, rule.SrcRule.Curve);
+                    ApplyFadeOut(last, PaMusicTransitions.SourceFadeStart(rule.SrcRule, last.ExitAbs, Now), rule.SrcRule.FadeMs, rule.SrcRule.Curve);
                 if (rule != null && rule.DstRule != null && rule.DstRule.FadeMs > 0)
                 {
-                    next.FadeInAt = next.EntryAbs + rule.DstRule.FadeOffsetMs / 1000.0;
+                    next.FadeInAt = PaMusicTransitions.DestinationFadeStart(rule.DstRule, next.EntryAbs,
+                        next.PlayPreEntry ? Math.Max(Now, next.T0) : next.EntryAbs);
                     next.FadeInMs = rule.DstRule.FadeMs;
                     next.FadeInCurve = rule.DstRule.Curve;
                 }
@@ -1000,7 +1001,8 @@ namespace PortAudio
                 var r = PaMusicTransitions.Find(Banks, sw.NodeId, srcPath, dstPath);
                 string syncType = r != null && r.SrcRule != null ? r.SrcRule.Sync : "exitMarker";
                 uint cue = r != null && r.SrcRule != null ? r.SrcRule.CueFilter : 0;
-                double at = PaMusicTransitions.SyncIn(syncType, cue, s.Info, s.T0, t);
+                double at = PaMusicTransitions.SyncIn(syncType, cue, s.Info, s.T0,
+                    PaMusicTransitions.EarliestSync(r != null ? r.SrcRule : null, t, now));
                 if (!double.IsNaN(at))
                 {
                     src = s;
@@ -1042,9 +1044,7 @@ namespace PortAudio
             }
             var srcRule = rule != null ? rule.SrcRule : null;
             int fadeMs = srcRule != null ? srcRule.FadeMs : 0;
-            double fadeAt = sync + (srcRule != null ? srcRule.FadeOffsetMs / 1000.0 : 0);
-            if (fadeAt < now)
-                fadeAt = now;
+            double fadeAt = PaMusicTransitions.SourceFadeStart(srcRule, sync, now);
             foreach (var s in segs)
             {
                 if (s.Stinger)
@@ -1095,7 +1095,7 @@ namespace PortAudio
             dst.Placed = true;
             if (dstRule != null && dstRule.FadeMs > 0)
             {
-                dst.FadeInAt = sync + dstRule.FadeOffsetMs / 1000.0;
+                dst.FadeInAt = PaMusicTransitions.DestinationFadeStart(dstRule, sync, dst.CutBefore);
                 dst.FadeInMs = dstRule.FadeMs;
                 dst.FadeInCurve = dstRule.Curve;
             }

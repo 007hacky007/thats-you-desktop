@@ -148,7 +148,7 @@ namespace PortAudio.Tests
         [PaTest]
         public void ExitMarkerTransitionWithFades()
         {
-            using (var f = LevelSwitch(Rule(-1, -1, "exitMarker", "entryMarker", srcFadeMs: 500, srcFadeOffsetMs: -500, dstFadeMs: 200)))
+            using (var f = LevelSwitch(Rule(-1, -1, "exitMarker", "entryMarker", srcFadeMs: 500, srcFadeOffsetMs: 500, dstFadeMs: 200)))
             {
                 f.Play(4000);
                 f.Run(1.0);
@@ -160,6 +160,7 @@ namespace PortAudio.Tests
                 Check.Near(-200, fade.Db, 0.01, "to silence");
                 Check.Equal(500, fade.Ms, "source fade length");
                 Check.Near(103.8, fade.Now, 0.011, "fade starts 500 ms before the exit");
+                Check.Near(104.3, fade.Now + fade.Ms / 1000.0, 0.011, "fade ends at the sync point");
                 var stop = src.Ops.First(o => o.Kind == "stopAt");
                 Check.Near(104.3, stop.At, 1e-6, "source stops at the exit");
                 var dst = f.Voices.Sounding(42)[0];
@@ -169,6 +170,82 @@ namespace PortAudio.Tests
                 Check.True(din != null && din.Ms <= 200 && din.Ms >= 190 && din.Db == 0f, "destination fades in over 200 ms");
                 Check.Near(104.3, din.Now, 0.011, "fade-in at the sync point");
             }
+        }
+
+        [PaTest]
+        public void NextBeatFadeOutEndsOnTheBeat()
+        {
+            // real-data shape: nextBeat, fade 1000 ms with offset 1000 ms
+            using (var f = LevelSwitch(Rule(-1, -1, "nextBeat", "entryMarker", srcFadeMs: 1000, srcFadeOffsetMs: 1000)))
+            {
+                f.Play(4000);
+                f.Run(1.1);                         // now 101.1; the fade needs 1 s, so the first beat >= 102.1
+                f.SetState(LevelGroup, Level2);
+                f.Run(2.5);
+                var dst = f.Voices.Sounding(42)[0];
+                Check.Near(102.3, dst.Spec.StartAt, 1e-6, "sync pushed to the beat the fade fits before");
+                var src = f.Voices.ForMedia(41)[0];
+                var fade = src.Find("fade", 1);
+                Check.True(fade != null, "source fade on slot 1");
+                Check.Near(101.3, fade.Now, 0.011, "fade starts 1 s before the beat");
+                Check.Near(102.3, fade.Now + fade.Ms / 1000.0, 0.011, "fade ends on the beat");
+                Check.Near(102.3, src.Ops.Last(o => o.Kind == "stopAt").At, 1e-6, "source stops at the sync");
+            }
+        }
+
+        [PaTest]
+        public void ImmediateFadeOutStartsNow()
+        {
+            // real-data shape: immediate, fade 2000 ms with offset 2000 ms; the sync is not delayed
+            using (var f = LevelSwitch(Rule(-1, -1, "immediate", "entryMarker", srcFadeMs: 2000, srcFadeOffsetMs: 2000)))
+            {
+                f.Play(4000);
+                f.Run(1.0);                         // now 101.0, sync 101.3
+                f.SetState(LevelGroup, Level2);
+                f.Run(3.0);
+                var dst = f.Voices.Sounding(42)[0];
+                Check.Near(101.3, dst.Spec.StartAt, 1e-6, "destination after the lead");
+                var src = f.Voices.ForMedia(41)[0];
+                var fade = src.Find("fade", 1);
+                Check.True(fade != null, "source fade on slot 1");
+                Check.Near(101.0, fade.Now, 0.011, "fade start clamped to now, never after the sync");
+                Check.True(fade.Ms >= 1990 && fade.Ms <= 2000, "full fade length");
+                Check.Near(103.0, src.Ops.Last(o => o.Kind == "stopAt").At, 1e-6, "source stops when the fade ends");
+            }
+        }
+
+        [PaTest]
+        public void DestinationFadeOffsetDoesNotDelayFadeIn()
+        {
+            using (var f = LevelSwitch(Rule(-1, -1, "exitMarker", "entryMarker", dstFadeMs: 500, dstFadeOffsetMs: 500)))
+            {
+                f.Play(4000);
+                f.Run(1.0);
+                f.SetState(LevelGroup, Level2);
+                f.Run(4.0);
+                var dst = f.Voices.Sounding(42)[0];
+                Check.Near(104.3, dst.Spec.StartAt, 1e-6, "destination at the exit");
+                Check.True(dst.Has("gain", 1, -200), "destination starts silent");
+                var din = dst.Find("fade", 1);
+                Check.True(din != null && din.Db == 0f, "destination fades in");
+                Check.Near(104.3, din.Now, 0.011, "fade-in starts when the destination starts");
+                Check.True(din.Ms >= 490 && din.Ms <= 500, "fade-in heard in full");
+            }
+        }
+
+        [PaTest]
+        public void FadeStartHelpers()
+        {
+            var src = new PaTransitionSrc { Sync = "nextBeat", FadeMs = 1000, FadeOffsetMs = 1000 };
+            Check.Near(9.0, PaMusicTransitions.SourceFadeStart(src, 10.0, 5.0), 1e-9, "offset before the sync");
+            Check.Near(9.5, PaMusicTransitions.SourceFadeStart(src, 10.0, 9.5), 1e-9, "clamped to now");
+            Check.Near(10.0, PaMusicTransitions.SourceFadeStart(null, 10.0, 5.0), 1e-9, "no rule: at the sync");
+            Check.Near(6.0, PaMusicTransitions.EarliestSync(src, 5.3, 5.0), 1e-9, "grid sync leaves room for the fade");
+            Check.Near(5.3, PaMusicTransitions.EarliestSync(new PaTransitionSrc { Sync = "immediate", FadeMs = 1000, FadeOffsetMs = 1000 }, 5.3, 5.0), 1e-9, "immediate not moved");
+            Check.Near(5.3, PaMusicTransitions.EarliestSync(new PaTransitionSrc { Sync = "exitMarker", FadeMs = 1000, FadeOffsetMs = 1000 }, 5.3, 5.0), 1e-9, "exit not moved");
+            var dst = new PaTransitionDst { FadeMs = 500, FadeOffsetMs = 500 };
+            Check.Near(10.0, PaMusicTransitions.DestinationFadeStart(dst, 10.0, 10.0), 1e-9, "not before the destination sounds");
+            Check.Near(9.5, PaMusicTransitions.DestinationFadeStart(dst, 10.0, 8.0), 1e-9, "into pre-entry");
         }
 
         [PaTest]
