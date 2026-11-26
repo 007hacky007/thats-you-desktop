@@ -75,6 +75,15 @@ class OpsTest(unittest.TestCase):
         self.assertNotIn("int x", out)
         self.assertIn("string s", out)
 
+    def test_lines_checks_hash(self):
+        import hashlib
+        text = "a\nb\nc\n"
+        sha = hashlib.sha256(b"b\n").hexdigest()[:16]
+        self.assertEqual(ge.Lines(2, 1, sha, "B1\nB2\n").apply_text(text), "a\nB1\nB2\nc\n")
+        self.assertEqual(ge.Lines(2, 0, hashlib.sha256(b"").hexdigest()[:16], "x\n").apply_text(text), "a\nx\nb\nc\n")
+        with self.assertRaises(ge.EditError):
+            ge.Lines(1, 1, sha, "").apply_text(text)
+
     def test_material_shader_map(self):
         mat = "Material:\n  m_Shader: {fileID: 4800000, guid: aaa, type: 3}\n"
         out = ge.MaterialShaderMap({(4800000, "aaa"): ("bbb", 4800000, 3)}).apply_text(mat)

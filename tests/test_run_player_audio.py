@@ -26,7 +26,7 @@ class AudioArgvTest(unittest.TestCase):
     def test_default_argv_unchanged(self):
         argv = run_player.player_argv(Path("/a/exe"), Path("/r/x"))
         self.assertEqual(argv, ["/a/exe", "-logFile", "/r/x/player.log", "-portObserve", "/r/x/shots",
-                                "-screen-width", "1280", "-screen-height", "720", "-screen-fullscreen", "0"])
+                                "-portMute", "-screen-width", "1280", "-screen-height", "720", "-screen-fullscreen", "0"])
         self.assertFalse(any("Audio" in a or "Voice" in a for a in argv))
 
     def test_audio_flags_mapped(self):

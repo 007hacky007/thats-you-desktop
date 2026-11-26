@@ -47,7 +47,7 @@ class PlayerArgvTests(unittest.TestCase):
         argv = run_player.player_argv(Path("/a/exe"), Path("/r/x"), keys="3:cross",
                                       save_dir=Path("/r/x/save"), no_image_effects=True)
         self.assertEqual(argv, ["/a/exe", "-logFile", "/r/x/player.log", "-portObserve", "/r/x/shots",
-                                "-portKeys", "3:cross", "-portSaveDir", "/r/x/save", "-portNoImageEffects",
+                                "-portKeys", "3:cross", "-portMute", "-portSaveDir", "/r/x/save", "-portNoImageEffects",
                                 "-screen-width", "1280", "-screen-height", "720", "-screen-fullscreen", "0"])
 
     def test_fx_only_and_keep(self):

@@ -1,4 +1,4 @@
-"""Run the whole pipeline: merge -> extract game -> extract app -> project -> patches -> audio
+"""Run the whole pipeline: merge -> extract game -> extract app -> project -> game edits -> audio
 -> Unity import -> texture import fix -> Unity reimport -> report."""
 from __future__ import annotations
 
@@ -8,18 +8,27 @@ import os
 import shutil
 from pathlib import Path
 
-from pipeline import audio, compile_report, config, extract_app, extract_game, fix_textures, merge, patches, unity
+from pipeline import audio, compile_report, config, extract_app, extract_game, fix_textures, game_edits, merge, unity
 from pipeline.csc_check import PORT_DIR
 from pipeline.merge import _place_file
 
 PROJECT_MARKER = ".project-state.json"
 
 
-def _patch_digest(patch_dir: Path) -> str:
-    h = hashlib.sha256()
-    for p in sorted(Path(patch_dir).glob("*.patch")):
-        h.update(p.name.encode() + b"\0" + p.read_bytes())
-    return h.hexdigest()
+class GameEdits:
+    """The port's edits of the exported game code (pipeline/game_edits)."""
+
+    @staticmethod
+    def digest() -> str:
+        h = hashlib.sha256()
+        base = Path(game_edits.__file__).parent
+        for p in sorted(base.rglob("*.py")):
+            h.update(p.relative_to(base).as_posix().encode() + b"\0" + p.read_bytes())
+        return h.hexdigest()
+
+    @staticmethod
+    def apply(root: Path) -> None:
+        game_edits.apply_all(root, log=lambda *_: None)
 
 
 def _clone_tree(src: Path, dst: Path) -> None:
@@ -57,32 +66,32 @@ def sync_port(port_dir: Path, project: Path) -> None:
                 Path(dirpath).rmdir()
 
 
-def prepare_project(pristine: Path, project: Path, patch_dir: Path, port_dir: Path | None = None) -> bool:
-    """(Re)build the working project from the pristine export when patches changed, then sync
+def prepare_project(pristine: Path, project: Path, edits=None, port_dir: Path | None = None) -> bool:
+    """(Re)build the working project from the pristine export when the edits changed, then sync
     unity/Port into Assets/Port. Returns True when the project was rebuilt. Unity's Library cache is kept."""
     port_dir = PORT_DIR if port_dir is None else port_dir
-    rebuilt = _rebuild_if_needed(pristine, project, patch_dir)
+    rebuilt = _rebuild_if_needed(pristine, project, GameEdits if edits is None else edits)
     sync_port(port_dir, project)
     return rebuilt
 
 
-def _rebuild_if_needed(pristine: Path, project: Path, patch_dir: Path) -> bool:
+def _rebuild_if_needed(pristine: Path, project: Path, edits) -> bool:
     pristine_marker = pristine / ".export-complete"
-    digest = _patch_digest(patch_dir) + ":" + (pristine_marker.read_text() if pristine_marker.is_file() else "")
+    digest = edits.digest() + ":" + (pristine_marker.read_text() if pristine_marker.is_file() else "")
     state = project / PROJECT_MARKER
-    if state.is_file() and json.loads(state.read_text()).get("patches") == digest:
+    if state.is_file() and json.loads(state.read_text()).get("edits") == digest:
         return False
     tmp = project.with_name(project.name + ".tmp")
     if tmp.exists():
         shutil.rmtree(tmp)
     _clone_tree(pristine, tmp)
-    patches.apply_all(tmp, patch_dir)
+    edits.apply(tmp)
     if (project / "Library").is_dir():
         (project / "Library").rename(tmp / "Library")
     if project.exists():
         shutil.rmtree(project)
     tmp.rename(project)
-    state.write_text(json.dumps({"patches": digest}))
+    state.write_text(json.dumps({"edits": digest}))
     return True
 
 
@@ -122,7 +131,7 @@ def build_project(c: config.Config, pristine: Path, project: Path, *, prepare=pr
     """prepare the project -> convert and install the audio -> Unity import. The audio goes in
     before the import so Unity imports the PortAudio files once. Returns the Unity exit code."""
     w = c.work_dir
-    log("project rebuilt:", prepare(pristine, project, patches.PATCH_DIR))
+    log("project rebuilt:", prepare(pristine, project, GameEdits))
     (audio_build or audio.build)(w, project)
     return import_(c.unity_editor, project, w / "merged" / "Media", w / "reports")
 

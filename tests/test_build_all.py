@@ -7,14 +7,25 @@ from types import SimpleNamespace
 from pipeline import build_all
 
 
+class FakeEdits:
+    def __init__(self):
+        self.version, self.fn = "v1", lambda root: None
+
+    def digest(self):
+        return self.version
+
+    def apply(self, root):
+        self.fn(root)
+
+
 class PrepareProjectTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         r = Path(self.tmp.name)
-        self.pristine, self.project, self.pdir = r / "pristine", r / "project", r / "patches"
+        self.pristine, self.project = r / "pristine", r / "project"
         (self.pristine / "Assets").mkdir(parents=True)
         (self.pristine / "Assets/A.cs").write_text("class A {}\n")
-        self.pdir.mkdir()
+        self.pdir = FakeEdits()
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -23,19 +34,18 @@ class PrepareProjectTests(unittest.TestCase):
         self.assertTrue(build_all.prepare_project(self.pristine, self.project, self.pdir))
         self.assertEqual((self.project / "Assets/A.cs").read_text(), "class A {}\n")
 
-    def test_unchanged_patches_skip(self):
+    def test_unchanged_edits_skip(self):
         build_all.prepare_project(self.pristine, self.project, self.pdir)
         (self.project / "Assets/A.cs").write_text("edited in editor\n")
         self.assertFalse(build_all.prepare_project(self.pristine, self.project, self.pdir))
         self.assertEqual((self.project / "Assets/A.cs").read_text(), "edited in editor\n")
 
-    def test_changed_patches_rebuild_and_keep_library(self):
+    def test_changed_edits_rebuild_and_keep_library(self):
         build_all.prepare_project(self.pristine, self.project, self.pdir)
         (self.project / "Library").mkdir()
         (self.project / "Library/cache").write_text("big")
-        (self.pdir / "010-x.patch").write_text(
-            "--- a/Assets/A.cs\n+++ b/Assets/A.cs\n@@ -1 +1 @@\n-class A {}\n+class A { int x; }\n")
-        (self.pdir / "010-x.md").write_text("x")
+        self.pdir.version = "v2"
+        self.pdir.fn = lambda root: (root / "Assets/A.cs").write_text("class A { int x; }\n")
         self.assertTrue(build_all.prepare_project(self.pristine, self.project, self.pdir))
         self.assertEqual((self.project / "Assets/A.cs").read_text(), "class A { int x; }\n")
         self.assertEqual((self.project / "Library/cache").read_text(), "big")
@@ -54,7 +64,7 @@ class PrepareProjectTests(unittest.TestCase):
         (port / "Stubs/S.cs").write_text("class S {}\n")
         build_all.prepare_project(self.pristine, self.project, self.pdir, port_dir=port)
         self.assertEqual((self.project / "Assets/Port/Stubs/S.cs").read_text(), "class S {}\n")
-        # edits and deletions in the repo show up on the next run, even without patch changes
+        # edits and deletions in the repo show up on the next run, even without recipe changes
         (port / "Stubs/S.cs").write_text("class S2 {}\n")
         (port / "New.cs").write_text("class N {}\n")
         build_all.prepare_project(self.pristine, self.project, self.pdir, port_dir=port)
@@ -150,7 +160,7 @@ class BuildProjectTests(unittest.TestCase):
         calls = []
         c = SimpleNamespace(work_dir=Path("/w"), unity_editor=Path("/u/Unity"))
 
-        def prepare(pristine, project, patch_dir):
+        def prepare(pristine, project, edits):
             calls.append(("prepare", pristine, project))
             return False
 

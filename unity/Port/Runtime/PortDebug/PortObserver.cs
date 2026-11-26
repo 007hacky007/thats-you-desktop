@@ -76,6 +76,7 @@ namespace PortDebug
             DontDestroyOnLoad(go);
             s_Instance = go.AddComponent<PortObserver>();
             s_Instance.m_KeyShots = HasFlag(args, "-portKeyShots");
+            s_Instance.m_FxAB = Arg(args, "-portFxAB");
             string interval = Arg(args, "-portShotInterval");
             if (interval != null)
             {
@@ -192,6 +193,8 @@ namespace PortDebug
                 m_NextShot = now + m_ShotInterval;
                 Shot("timer");
                 Probe("timer");
+                if (!string.IsNullOrEmpty(m_FxAB))
+                    StartCoroutine(ShotWithout(m_FxAB));
             }
         }
 
@@ -233,6 +236,33 @@ namespace PortDebug
             Event("scene", null, desc);
             Shot("scene", scene.name);
             Probe("scene " + scene.name);
+        }
+
+        // -portFxAB <type>: after each timer shot, a second one a few frames later with every enabled
+        // component of that type (class name or full name) on the cameras switched off, then back on.
+        // Pairs NNNN_<scene>_timer / NNNN+1_<scene>_no-<type> show what the effect changes.
+        string m_FxAB;
+
+        System.Collections.IEnumerator ShotWithout(string type)
+        {
+            yield return null;
+            var off = new List<Behaviour>();
+            foreach (Camera cam in Camera.allCameras)
+                foreach (MonoBehaviour mb in cam.GetComponents<MonoBehaviour>())
+                    if (mb != null && mb.enabled && (mb.GetType().Name == type || mb.GetType().FullName == type))
+                    {
+                        mb.enabled = false;
+                        off.Add(mb);
+                    }
+            if (off.Count == 0)
+                yield break;
+            yield return null;
+            yield return null;
+            Shot("no-" + type);
+            yield return new WaitForEndOfFrame();
+            yield return null;
+            foreach (Behaviour b in off)
+                if (b != null) b.enabled = true;
         }
 
         void Shot(string reason, string sceneName = null)

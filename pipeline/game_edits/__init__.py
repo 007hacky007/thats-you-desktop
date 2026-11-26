@@ -296,6 +296,27 @@ class AddMembers(Op):
 
 
 @dataclass
+class Lines(Op):
+    """Replace lines start..start+count-1 (1-based) with `code`. `sha` is the sha256 (first 16 hex)
+    of the replaced lines, so a different export fails loudly instead of being edited wrongly.
+    Within one File, give Lines ops bottom-up (later lines first) so numbers stay valid."""
+    start: int
+    count: int
+    sha: str
+    code: str
+
+    def apply_text(self, text):
+        import hashlib
+        lines = text.splitlines(True)
+        i = self.start - 1
+        old = "".join(lines[i:i + self.count])
+        if i < 0 or i + self.count > len(lines) or hashlib.sha256(old.encode()).hexdigest()[:16] != self.sha:
+            raise EditError(f"lines {self.start}+{self.count} are not what this edit expects "
+                            "(different game version or export?)")
+        return "".join(lines[:i]) + self.code + "".join(lines[i + self.count:])
+
+
+@dataclass
 class ReplaceText(Op):
     """Whole-file replacement with the port's own code (a file the port rewrites completely)."""
     code: str

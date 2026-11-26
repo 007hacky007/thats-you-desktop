@@ -166,6 +166,8 @@ def main(argv=None) -> int:
                     help="TV key script for the language select and splash (run_player --keys format)")
     ap.add_argument("--headful", action="store_true")
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--player-args", default="", metavar="ARGS",
+                    help='extra game arguments, e.g. "-portFxAB ScreenSpaceReflection"')
     ap.add_argument("--android", nargs="?", const="", default=None, metavar="SERIAL",
                     help="also play on an Android Chrome over adb (optional device serial)")
     a = ap.parse_args(argv)
@@ -187,7 +189,7 @@ def main(argv=None) -> int:
 
     def player():
         result["rc"] = run_player.run(exe, run_dir, seconds, a.keys, shot_interval=15.0,
-                                      extra=["-portJoinUrlFile", str(join_file)], audio={"mute": True})
+                                      extra=["-portJoinUrlFile", str(join_file)] + a.player_args.split(), audio={"mute": True})
 
     t = threading.Thread(target=player, daemon=True)
     t.start()
