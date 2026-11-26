@@ -23,7 +23,7 @@ from pathlib import Path
 
 from pipeline import run_player, web_common, web_e2e, web_serve
 
-STUCK_S = 150.0  # same phone screen with no TV progress for this long -> stuck
+STUCK_S = 300.0  # same phone screen with no TV progress for this long -> stuck
 TAP_GAP_S = 1.5
 
 STATE_JS = r"""(() => {

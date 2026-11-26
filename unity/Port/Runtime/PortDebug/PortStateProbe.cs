@@ -178,6 +178,11 @@ namespace PortDebug
             w.Key("time").Str(Time.time.ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
             w.Key("real").Str(Time.realtimeSinceStartup.ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
             w.Key("frames").Int(Time.frameCount);
+            w.Key("unscaled").Str(Time.unscaledTime.ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
+            w.Key("dt").Str(Time.deltaTime.ToString("F4", System.Globalization.CultureInfo.InvariantCulture));
+            w.Key("udt").Str(Time.unscaledDeltaTime.ToString("F4", System.Globalization.CultureInfo.InvariantCulture));
+            w.Key("captureDt").Str(Time.captureDeltaTime.ToString("F4", System.Globalization.CultureInfo.InvariantCulture));
+            w.Key("maxDt").Str(Time.maximumDeltaTime.ToString("F3", System.Globalization.CultureInfo.InvariantCulture));
             w.Key("targetFps").Int(Application.targetFrameRate);
             w.End();
         }

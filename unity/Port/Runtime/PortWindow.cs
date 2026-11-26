@@ -2,6 +2,7 @@
 // - The game was made for a 16:9 TV: when the player window is resized, it snaps back to 16:9
 //   (keeping the edge the user dragged), once the size has been stable for a moment.
 // - -portMute silences all output (automated test runs).
+// - vsync off so frame time comes from the real clock (see Update).
 
 using System;
 using UnityEngine;
@@ -60,6 +61,12 @@ namespace PortRuntime
         void Update()
         {
             PortMuteGuard();
+            // With vsync on, Unity derives deltaTime from the display refresh. On a 120 Hz Mac display
+            // that macOS throttles to 60 Hz (window not in front) every frame then counts as 1/120 s and
+            // the whole game runs at half speed. The game caps itself at 60 fps (targetFrameRate), so
+            // timing from the real clock is safe.
+            if (QualitySettings.vSyncCount != 0)
+                QualitySettings.vSyncCount = 0;
             if (Screen.fullScreenMode != FullScreenMode.Windowed)
                 return;
             int w = Screen.width, h = Screen.height;
