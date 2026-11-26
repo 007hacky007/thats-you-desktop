@@ -52,7 +52,7 @@ const RAW_FUNCTIONS = {
   Shrink: scaleInside(0.36, 0.65, 'round'),
   // the horizontal middle band is stretched vertically
   Stretch(x, y) {
-    return [x, y + 0.12 * Math.sin(TAU * y)];
+    return [x, y + 0.07 * Math.sin(TAU * y)];
   },
   // six-fold mirror around the centre of the square feed
   Kaleidoscope(x, y) {
@@ -84,7 +84,7 @@ const RAW_FUNCTIONS = {
   Square: scaleInside(0.34, -0.5, 'box'),
   // a grid of glass blocks, 3 x 4
   Grid(x, y) {
-    const a = 0.9;
+    const a = 0.6;
     return [
       x - (a * Math.sin(TAU * 3 * x)) / (TAU * 3),
       y - (a * Math.sin(TAU * 4 * y)) / (TAU * 4),
