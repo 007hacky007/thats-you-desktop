@@ -1,0 +1,113 @@
+{
+  "schema": 1,
+  "name": "reconnect",
+  "description": "bye closed: the page reconnects by itself with the same uid.",
+  "players": 1,
+  "auto": {
+    "join": true,
+    "resources": true,
+    "session_id": 4242,
+    "jokers": 2,
+    "refuse": 0,
+    "pending_ms": 0
+  },
+  "steps": [
+    {
+      "id": "join",
+      "doc": "player 0 taps PLAY: hello, join handshake, assignment burst, empty manifest",
+      "player": 0,
+      "screen": "connect",
+      "page": [
+        {
+          "do": "tap",
+          "target": "connect-play"
+        }
+      ],
+      "expect": [
+        {
+          "frame": "hello"
+        },
+        {
+          "msg": "ClientRequestPlayerIDMessage",
+          "fields": {
+            "UID": "$uid:0"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "eq": []
+            }
+          }
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "drop",
+      "doc": "the game drops the session",
+      "player": 0,
+      "send": [
+        {
+          "frame": {
+            "t": "bye",
+            "reason": "closed"
+          }
+        },
+        {
+          "close": true
+        }
+      ],
+      "expect": [
+        {
+          "closed": true
+        },
+        {
+          "frame": "hello",
+          "uid": "$uid:0"
+        },
+        {
+          "msg": "ClientRequestPlayerIDMessage",
+          "fields": {
+            "UID": "$uid:0"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "eq": []
+            }
+          }
+        }
+      ],
+      "timeout_ms": 30000
+    },
+    {
+      "id": "rejoin-holding",
+      "doc": "REJOIN holding after the reconnect",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientHoldingScreenCommandMessage",
+            "action": 5,
+            "time": 0.0,
+            "HoldingScreenText": "",
+            "HoldingScreenType": 8,
+            "OtherPlayerIndex": -1,
+            "ShowPortraitPhotoControls": false
+          }
+        }
+      ],
+      "screen": "holding",
+      "variant": "rejoin",
+      "expect": [
+        {
+          "none_ms": 300
+        }
+      ]
+    }
+  ]
+}

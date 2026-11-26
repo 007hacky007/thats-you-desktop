@@ -1,0 +1,131 @@
+{
+  "schema": 1,
+  "name": "rejoin-reload",
+  "description": "Page reload: same uid, same PlayerID and slot, REJOIN holding screen.",
+  "players": 1,
+  "auto": {
+    "join": true,
+    "resources": true,
+    "session_id": 4242,
+    "jokers": 2,
+    "refuse": 0,
+    "pending_ms": 0
+  },
+  "steps": [
+    {
+      "id": "join",
+      "doc": "player 0 taps PLAY: hello, join handshake, assignment burst, empty manifest",
+      "player": 0,
+      "screen": "connect",
+      "page": [
+        {
+          "do": "tap",
+          "target": "connect-play"
+        }
+      ],
+      "expect": [
+        {
+          "frame": "hello"
+        },
+        {
+          "msg": "ClientRequestPlayerIDMessage",
+          "fields": {
+            "UID": "$uid:0"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "eq": []
+            }
+          }
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "reload",
+      "doc": "reload reconnects at once with the same uid",
+      "player": 0,
+      "screen": "joined",
+      "page": [
+        {
+          "do": "reload"
+        }
+      ],
+      "expect": [
+        {
+          "frame": "hello",
+          "uid": "$uid:0"
+        },
+        {
+          "msg": "ClientRequestPlayerIDMessage",
+          "fields": {
+            "UID": "$uid:0"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "eq": []
+            }
+          }
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "rejoin-holding",
+      "doc": "the game puts a mid-question rejoiner on REJOIN",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientHoldingScreenCommandMessage",
+            "action": 5,
+            "time": 0.0,
+            "HoldingScreenText": "",
+            "HoldingScreenType": 8,
+            "OtherPlayerIndex": -1,
+            "ShowPortraitPhotoControls": false
+          }
+        },
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 29,
+            "time": 0.0
+          }
+        }
+      ],
+      "screen": "holding",
+      "variant": "rejoin",
+      "expect": [
+        {
+          "none_ms": 500
+        }
+      ]
+    },
+    {
+      "id": "unpause",
+      "doc": "Unpause",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 30,
+            "time": 0.0
+          }
+        }
+      ],
+      "expect": [
+        {
+          "none_ms": 300
+        }
+      ]
+    }
+  ]
+}

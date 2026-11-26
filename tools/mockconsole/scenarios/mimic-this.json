@@ -1,0 +1,256 @@
+{
+  "schema": 1,
+  "name": "mimic-this",
+  "description": "Mimic This: reference picture, photo, SendMimicThisPhoto, vote.",
+  "players": 1,
+  "auto": {
+    "join": true,
+    "resources": true,
+    "session_id": 4242,
+    "jokers": 2,
+    "refuse": 0,
+    "pending_ms": 0
+  },
+  "images": {
+    "mt1": {
+      "w": 360,
+      "h": 480,
+      "color": "#66aa22",
+      "label": "MT"
+    },
+    "mt2": {
+      "w": 480,
+      "h": 640,
+      "color": "#2266aa",
+      "label": "MT2"
+    }
+  },
+  "steps": [
+    {
+      "id": "join",
+      "doc": "player 0 taps PLAY: hello, join handshake, assignment burst, empty manifest",
+      "player": 0,
+      "screen": "connect",
+      "page": [
+        {
+          "do": "tap",
+          "target": "connect-play"
+        }
+      ],
+      "expect": [
+        {
+          "frame": "hello"
+        },
+        {
+          "msg": "ClientRequestPlayerIDMessage",
+          "fields": {
+            "UID": "$uid:0"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "eq": []
+            }
+          }
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "manifest",
+      "doc": "question data and the 360x480 reference",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientHoldingScreenCommandMessage",
+            "action": 5,
+            "time": 0.0,
+            "HoldingScreenText": "",
+            "HoldingScreenType": 4,
+            "OtherPlayerIndex": -1,
+            "ShowPortraitPhotoControls": false
+          }
+        },
+        {
+          "msg": {
+            "TypeString": "QuestionDataMessage",
+            "RoundType": 64,
+            "QuestionText": "Mimic this!"
+          }
+        },
+        {
+          "manifest": [
+            {
+              "image": "mt1",
+              "r": 1
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "msg": "RequestResourceMessage",
+          "fields": {
+            "ResourceGUID": "$guid:mt1"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "type": "array"
+            }
+          }
+        }
+      ],
+      "order": "any",
+      "timeout_ms": 15000
+    },
+    {
+      "id": "mimic",
+      "doc": "take the mimic photo; it is sent on SendMimicThisPhoto",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientMimicThisCommandMessage",
+            "action": 23,
+            "time": 0.0,
+            "MimicPictureGUID": "$guid:mt1"
+          }
+        }
+      ],
+      "screen": "mimic",
+      "page": [
+        {
+          "do": "tap",
+          "target": "shutter"
+        }
+      ],
+      "expect": [
+        {
+          "none_ms": 1000
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "send-photo",
+      "doc": "SendMimicThisPhoto",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 24,
+            "time": 0.0
+          }
+        }
+      ],
+      "screen": "holding",
+      "variant": "look-at-tv",
+      "expect": [
+        {
+          "upload": {
+            "ImgType": 4,
+            "width": 480,
+            "height": 640,
+            "maxBytes": 128000
+          },
+          "capture": "mt_photo"
+        },
+        {
+          "msg": "TrophyPhotoFXInfoMessage",
+          "fields": {
+            "ImageGUID": "$cap:mt_photo",
+            "usesFX": {
+              "type": "bool"
+            }
+          }
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "vote-manifest",
+      "doc": "photos Required",
+      "player": 0,
+      "send": [
+        {
+          "manifest": [
+            {
+              "image": "mt2",
+              "r": 1
+            },
+            {
+              "guid": "$cap:mt_photo",
+              "r": 1
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "msg": "RequestResourceMessage",
+          "fields": {
+            "ResourceGUID": "$guid:mt2"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "type": "array"
+            }
+          }
+        }
+      ],
+      "order": "any",
+      "timeout_ms": 15000
+    },
+    {
+      "id": "vote",
+      "doc": "vote on the photos",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientAnswerCommandMessage",
+            "action": 3,
+            "time": 0.0,
+            "roundID": 64,
+            "questionBarText": "Mimic this!",
+            "jokersEnabled": false,
+            "ImageGUIDs": [
+              "$guid:mt2",
+              "$cap:mt_photo"
+            ]
+          }
+        }
+      ],
+      "screen": "answer",
+      "variant": "drawings",
+      "page": [
+        {
+          "do": "tap",
+          "target": "answer-2"
+        },
+        {
+          "do": "tap",
+          "target": "answer-confirm"
+        }
+      ],
+      "expect": [
+        {
+          "msg": "AnswerIndexResponseMessage",
+          "fields": {
+            "AnswerIndex": 2
+          }
+        }
+      ]
+    }
+  ]
+}

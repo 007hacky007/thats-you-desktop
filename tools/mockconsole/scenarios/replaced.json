@@ -1,0 +1,148 @@
+{
+  "schema": 1,
+  "name": "replaced",
+  "description": "A second browser context with the same uid replaces the first one, which then takes it back.",
+  "players": 2,
+  "bot": false,
+  "auto": {
+    "join": true,
+    "resources": true,
+    "session_id": 4242,
+    "jokers": 2,
+    "refuse": 0,
+    "pending_ms": 0
+  },
+  "steps": [
+    {
+      "id": "join",
+      "doc": "player 0 taps PLAY: hello, join handshake, assignment burst, empty manifest",
+      "player": 0,
+      "screen": "connect",
+      "page": [
+        {
+          "do": "tap",
+          "target": "connect-play"
+        }
+      ],
+      "expect": [
+        {
+          "frame": "hello"
+        },
+        {
+          "msg": "ClientRequestPlayerIDMessage",
+          "fields": {
+            "UID": "$uid:0"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "eq": []
+            }
+          }
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "second-tab",
+      "doc": "player 1 copies player 0's uid and joins: the console sees player 0 again",
+      "player": 1,
+      "screen": "connect",
+      "page": [
+        {
+          "do": "set_storage",
+          "key": "iwyk.uid",
+          "value": "$uid:0"
+        },
+        {
+          "do": "reload"
+        },
+        {
+          "do": "wait_screen",
+          "screen": "connect",
+          "timeout_ms": 10000
+        },
+        {
+          "do": "tap",
+          "target": "connect-play"
+        }
+      ],
+      "expect": [
+        {
+          "frame": "hello",
+          "uid": "$uid:0",
+          "player": 0
+        },
+        {
+          "closed": true,
+          "player": 0
+        },
+        {
+          "msg": "ClientRequestPlayerIDMessage",
+          "fields": {
+            "UID": "$uid:0"
+          },
+          "player": 0
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "player": 0
+        }
+      ],
+      "order": "any",
+      "timeout_ms": 20000
+    },
+    {
+      "id": "replaced-popup",
+      "doc": "the first context shows the replaced popup and does not reconnect",
+      "player": 0,
+      "screen": "connect",
+      "page": [
+        {
+          "do": "expect_visible",
+          "target": "popup",
+          "timeout_ms": 5000
+        }
+      ],
+      "expect": [
+        {
+          "none_ms": 3000
+        }
+      ],
+      "timeout_ms": 10000
+    },
+    {
+      "id": "take-back",
+      "doc": "its reconnect button replaces the second context",
+      "player": 0,
+      "page": [
+        {
+          "do": "tap",
+          "target": "popup-reconnect"
+        }
+      ],
+      "expect": [
+        {
+          "frame": "hello",
+          "uid": "$uid:0"
+        },
+        {
+          "closed": true
+        },
+        {
+          "msg": "ClientRequestPlayerIDMessage",
+          "fields": {
+            "UID": "$uid:0"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage"
+        }
+      ],
+      "order": "any",
+      "timeout_ms": 20000
+    }
+  ]
+}

@@ -1,0 +1,162 @@
+{
+  "schema": 1,
+  "name": "would-you-rather",
+  "description": "Would You Rather: two text cards, pick AnswerId 2, SendAnswer.",
+  "players": 1,
+  "auto": {
+    "join": true,
+    "resources": true,
+    "session_id": 4242,
+    "jokers": 2,
+    "refuse": 0,
+    "pending_ms": 0
+  },
+  "steps": [
+    {
+      "id": "join",
+      "doc": "player 0 taps PLAY: hello, join handshake, assignment burst, empty manifest",
+      "player": 0,
+      "screen": "connect",
+      "page": [
+        {
+          "do": "tap",
+          "target": "connect-play"
+        }
+      ],
+      "expect": [
+        {
+          "frame": "hello"
+        },
+        {
+          "msg": "ClientRequestPlayerIDMessage",
+          "fields": {
+            "UID": "$uid:0"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "eq": []
+            }
+          }
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "question",
+      "doc": "question data and an empty manifest",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientHoldingScreenCommandMessage",
+            "action": 5,
+            "time": 0.0,
+            "HoldingScreenText": "",
+            "HoldingScreenType": 4,
+            "OtherPlayerIndex": -1,
+            "ShowPortraitPhotoControls": false
+          }
+        },
+        {
+          "msg": {
+            "TypeString": "QuestionDataMessage",
+            "RoundType": 128,
+            "QuestionText": "Would you rather..."
+          }
+        },
+        {
+          "manifest": []
+        }
+      ],
+      "expect": [
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "eq": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "vote",
+      "doc": "two cards, pick the second",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "WouldYouRatherAnswerTextQuizMessage",
+            "AnswerText": "Be able to fly",
+            "AnswerId": 1
+          }
+        },
+        {
+          "msg": {
+            "TypeString": "WouldYouRatherAnswerTextQuizMessage",
+            "AnswerText": "Breathe under water",
+            "AnswerId": 2
+          }
+        },
+        {
+          "msg": {
+            "TypeString": "ClientAnswerCommandMessage",
+            "action": 3,
+            "time": 0.0,
+            "roundID": 128,
+            "questionBarText": "Would you rather...",
+            "jokersEnabled": false,
+            "ImageGUIDs": []
+          }
+        }
+      ],
+      "screen": "answer",
+      "variant": "texts",
+      "page": [
+        {
+          "do": "tap",
+          "target": "answer-2"
+        },
+        {
+          "do": "tap",
+          "target": "answer-confirm"
+        }
+      ],
+      "expect": [
+        {
+          "msg": "AnswerIndexResponseMessage",
+          "fields": {
+            "AnswerIndex": 2
+          }
+        }
+      ]
+    },
+    {
+      "id": "send-answer",
+      "doc": "SendAnswer",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 16,
+            "time": 0.0
+          }
+        }
+      ],
+      "screen": "holding",
+      "variant": "general",
+      "expect": [
+        {
+          "msg": "AnswerIndexResponseMessage",
+          "fields": {
+            "AnswerIndex": 2
+          }
+        }
+      ]
+    }
+  ]
+}

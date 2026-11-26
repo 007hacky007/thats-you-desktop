@@ -1,0 +1,348 @@
+{
+  "schema": 1,
+  "name": "quickdraw",
+  "description": "QuickDraw: selfie, holding screen, QuickDrawDrawing, SendQuickDrawDrawing, final vote as roundID 8.",
+  "players": 1,
+  "auto": {
+    "join": true,
+    "resources": true,
+    "session_id": 4242,
+    "jokers": 2,
+    "refuse": 0,
+    "pending_ms": 0
+  },
+  "images": {
+    "qd_prev": {
+      "w": 480,
+      "h": 640,
+      "color": "#aa6622",
+      "label": "QD"
+    },
+    "qd_other": {
+      "w": 384,
+      "h": 512,
+      "color": "#22aa66",
+      "label": "QD2"
+    }
+  },
+  "steps": [
+    {
+      "id": "join",
+      "doc": "player 0 taps PLAY: hello, join handshake, assignment burst, empty manifest",
+      "player": 0,
+      "screen": "connect",
+      "page": [
+        {
+          "do": "tap",
+          "target": "connect-play"
+        }
+      ],
+      "expect": [
+        {
+          "frame": "hello"
+        },
+        {
+          "msg": "ClientRequestPlayerIDMessage",
+          "fields": {
+            "UID": "$uid:0"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "eq": []
+            }
+          }
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "selfie",
+      "doc": "QuickDrawTakePhoto: selfie upload ImgType 5",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "QuestionDataMessage",
+            "RoundType": 256,
+            "QuestionText": "Quick draw!"
+          }
+        },
+        {
+          "msg": {
+            "TypeString": "ClientQuickDrawTakePhotoCommandMessage",
+            "action": 25,
+            "time": 0.0,
+            "CommandText": "Pull a funny face"
+          }
+        }
+      ],
+      "screen": "photo",
+      "variant": "quickdraw",
+      "page": [
+        {
+          "do": "tap",
+          "target": "shutter"
+        },
+        {
+          "do": "tap",
+          "target": "use"
+        }
+      ],
+      "expect": [
+        {
+          "upload": {
+            "ImgType": 5,
+            "width": 480,
+            "height": 640,
+            "maxBytes": 128000
+          },
+          "capture": "qd_selfie"
+        },
+        {
+          "msg": "TrophyPhotoFXInfoMessage",
+          "fields": {
+            "ImageGUID": "$cap:qd_selfie",
+            "usesFX": {
+              "type": "bool"
+            }
+          }
+        },
+        {
+          "msg": "UsePicPressedResponseMessage",
+          "fields": {
+            "Response": 4
+          }
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "manifest",
+      "doc": "per-player manifest: the previous player's picture",
+      "player": 0,
+      "send": [
+        {
+          "manifest": [
+            {
+              "image": "qd_prev",
+              "r": 1
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "msg": "RequestResourceMessage",
+          "fields": {
+            "ResourceGUID": "$guid:qd_prev"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "type": "array"
+            }
+          }
+        }
+      ],
+      "order": "any",
+      "timeout_ms": 15000
+    },
+    {
+      "id": "holding",
+      "doc": "QuickDraw holding screen (sentinel holding text)",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuickDrawHoldingScreenCommandMessage",
+            "action": 5,
+            "time": 0.0,
+            "HoldingScreenText": "***NOTSETHOLDINGSCREENTEXT",
+            "HoldingScreenType": 5,
+            "OtherPlayerIndex": -1,
+            "ShowPortraitPhotoControls": false,
+            "ImageGUID": "$guid:qd_prev",
+            "Heading": "Draw on Bob",
+            "Description": "Make it better",
+            "NumberOfDrawingsRemaining": 2,
+            "PlayerName": "Bob"
+          }
+        }
+      ],
+      "screen": "quickdraw-holding",
+      "expect": [
+        {
+          "none_ms": 500
+        }
+      ]
+    },
+    {
+      "id": "draw",
+      "doc": "QuickDrawDrawing",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 27,
+            "time": 0.0
+          }
+        }
+      ],
+      "screen": "draw",
+      "variant": "quickdraw",
+      "page": [
+        {
+          "do": "draw",
+          "target": "draw-canvas",
+          "points": [
+            [
+              0.2,
+              0.2
+            ],
+            [
+              0.8,
+              0.3
+            ],
+            [
+              0.5,
+              0.8
+            ]
+          ],
+          "steps": 12
+        },
+        {
+          "do": "tap",
+          "target": "draw-confirm"
+        }
+      ],
+      "expect": [
+        {
+          "none_ms": 1000
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "send-drawing",
+      "doc": "SendQuickDrawDrawing",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 28,
+            "time": 0.0
+          }
+        }
+      ],
+      "screen": "holding",
+      "variant": "look-at-tv",
+      "expect": [
+        {
+          "upload": {
+            "ImgType": 5,
+            "width": 384,
+            "height": 512,
+            "maxBytes": 128000
+          },
+          "capture": "qd_draw"
+        },
+        {
+          "msg": "TrophyDrawingColouringInfoMessage",
+          "fields": {
+            "ImageGUID": "$cap:qd_draw",
+            "ColoursAvailable": 32766,
+            "ColoursUsed": {
+              "ge": 0
+            }
+          }
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "vote-manifest",
+      "doc": "drawings in slot order",
+      "player": 0,
+      "send": [
+        {
+          "manifest": [
+            {
+              "image": "qd_other",
+              "r": 1
+            },
+            {
+              "guid": "$cap:qd_draw",
+              "r": 1
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "msg": "RequestResourceMessage",
+          "fields": {
+            "ResourceGUID": "$guid:qd_other"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "type": "array"
+            }
+          }
+        }
+      ],
+      "order": "any",
+      "timeout_ms": 15000
+    },
+    {
+      "id": "vote",
+      "doc": "final vote arrives as roundID 8",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientAnswerCommandMessage",
+            "action": 3,
+            "time": 0.0,
+            "roundID": 8,
+            "questionBarText": "Best drawing?",
+            "jokersEnabled": false,
+            "ImageGUIDs": [
+              "$cap:qd_draw",
+              "$guid:qd_other"
+            ]
+          }
+        }
+      ],
+      "screen": "answer",
+      "variant": "drawings",
+      "page": [
+        {
+          "do": "tap",
+          "target": "answer-2"
+        },
+        {
+          "do": "tap",
+          "target": "answer-confirm"
+        }
+      ],
+      "expect": [
+        {
+          "msg": "AnswerIndexResponseMessage",
+          "fields": {
+            "AnswerIndex": 2
+          }
+        }
+      ]
+    }
+  ]
+}

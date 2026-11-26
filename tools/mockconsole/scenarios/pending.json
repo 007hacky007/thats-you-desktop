@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "name": "pending",
+  "description": "Join pending for 3 s, then joined on the same session.",
+  "players": 1,
+  "auto": {
+    "join": true,
+    "resources": true,
+    "session_id": 4242,
+    "jokers": 2,
+    "refuse": 0,
+    "pending_ms": 3000
+  },
+  "steps": [
+    {
+      "id": "join",
+      "doc": "pending, the page waits, then joined",
+      "player": 0,
+      "screen": "connect",
+      "page": [
+        {
+          "do": "tap",
+          "target": "connect-play"
+        }
+      ],
+      "expect": [
+        {
+          "frame": "hello"
+        },
+        {
+          "none_ms": 2000
+        },
+        {
+          "msg": "ClientRequestPlayerIDMessage",
+          "fields": {
+            "UID": "$uid:0"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "eq": []
+            }
+          }
+        }
+      ],
+      "timeout_ms": 25000
+    },
+    {
+      "id": "joined",
+      "doc": "joined screen",
+      "player": 0,
+      "screen": "joined",
+      "expect": [
+        {
+          "none_ms": 300
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,187 @@
+{
+  "schema": 1,
+  "name": "blank-you",
+  "description": "Blank You: text entry, SendTextEntry, vote on the text cards by label.",
+  "players": 1,
+  "auto": {
+    "join": true,
+    "resources": true,
+    "session_id": 4242,
+    "jokers": 2,
+    "refuse": 0,
+    "pending_ms": 0
+  },
+  "steps": [
+    {
+      "id": "join",
+      "doc": "player 0 taps PLAY: hello, join handshake, assignment burst, empty manifest",
+      "player": 0,
+      "screen": "connect",
+      "page": [
+        {
+          "do": "tap",
+          "target": "connect-play"
+        }
+      ],
+      "expect": [
+        {
+          "frame": "hello"
+        },
+        {
+          "msg": "ClientRequestPlayerIDMessage",
+          "fields": {
+            "UID": "$uid:0"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "eq": []
+            }
+          }
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "text",
+      "doc": "type an answer; nothing is sent before SendTextEntry",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "QuestionDataMessage",
+            "RoundType": 32,
+            "QuestionText": "My secret talent is ____"
+          }
+        },
+        {
+          "msg": {
+            "TypeString": "ClientTextEntryCommandMessage",
+            "action": 8,
+            "time": 0.0,
+            "TitleText": "My secret talent is ____"
+          }
+        }
+      ],
+      "screen": "text",
+      "page": [
+        {
+          "do": "type",
+          "target": "text-input",
+          "text": "juggling"
+        },
+        {
+          "do": "tap",
+          "target": "text-confirm"
+        }
+      ],
+      "expect": [
+        {
+          "none_ms": 1500
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "send-text",
+      "doc": "SendTextEntry",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 18,
+            "time": 0.0
+          }
+        }
+      ],
+      "screen": "holding",
+      "variant": "look-at-tv",
+      "expect": [
+        {
+          "msg": "TextAnswerReponseMessage",
+          "fields": {
+            "Response": 5,
+            "Text": "juggling"
+          }
+        }
+      ]
+    },
+    {
+      "id": "vote",
+      "doc": "two text cards; the second has label 4",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "AnswerTextQuizStateMessage",
+            "AnswerText": "juggling",
+            "PlayerID": 7
+          }
+        },
+        {
+          "msg": {
+            "TypeString": "AnswerTextQuizStateMessage",
+            "AnswerText": "sleeping",
+            "PlayerID": 4
+          }
+        },
+        {
+          "msg": {
+            "TypeString": "ClientAnswerCommandMessage",
+            "action": 3,
+            "time": 0.0,
+            "roundID": 32,
+            "questionBarText": "My secret talent is ____",
+            "jokersEnabled": false,
+            "ImageGUIDs": []
+          }
+        }
+      ],
+      "screen": "answer",
+      "variant": "texts",
+      "page": [
+        {
+          "do": "tap",
+          "target": "answer-2"
+        },
+        {
+          "do": "tap",
+          "target": "answer-confirm"
+        }
+      ],
+      "expect": [
+        {
+          "msg": "AnswerIndexResponseMessage",
+          "fields": {
+            "AnswerIndex": 4
+          }
+        }
+      ]
+    },
+    {
+      "id": "send-answer",
+      "doc": "SendAnswer",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 16,
+            "time": 0.0
+          }
+        }
+      ],
+      "expect": [
+        {
+          "msg": "AnswerIndexResponseMessage",
+          "fields": {
+            "AnswerIndex": 4
+          }
+        }
+      ]
+    }
+  ]
+}

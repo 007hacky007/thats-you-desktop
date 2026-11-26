@@ -1,0 +1,299 @@
+{
+  "schema": 1,
+  "name": "pause-joker",
+  "description": "Pause and unpause overlays, joker earned, answer with the joker, SendJoker.",
+  "players": 1,
+  "auto": {
+    "join": true,
+    "resources": true,
+    "session_id": 4242,
+    "jokers": 2,
+    "refuse": 0,
+    "pending_ms": 0
+  },
+  "images": {
+    "p1": {
+      "w": 480,
+      "h": 640,
+      "color": "#cc6633",
+      "label": "P1"
+    },
+    "p2": {
+      "w": 480,
+      "h": 640,
+      "color": "#3366cc",
+      "label": "P2"
+    }
+  },
+  "steps": [
+    {
+      "id": "join",
+      "doc": "player 0 taps PLAY: hello, join handshake, assignment burst, empty manifest",
+      "player": 0,
+      "screen": "connect",
+      "page": [
+        {
+          "do": "tap",
+          "target": "connect-play"
+        }
+      ],
+      "expect": [
+        {
+          "frame": "hello"
+        },
+        {
+          "msg": "ClientRequestPlayerIDMessage",
+          "fields": {
+            "UID": "$uid:0"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "eq": []
+            }
+          }
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "pause",
+      "doc": "Pause overlay over the joined screen",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 29,
+            "time": 0.0
+          }
+        }
+      ],
+      "screen": "joined",
+      "expect": [
+        {
+          "none_ms": 500
+        }
+      ]
+    },
+    {
+      "id": "unpause",
+      "doc": "Unpause",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 30,
+            "time": 0.0
+          }
+        }
+      ],
+      "screen": "joined",
+      "expect": [
+        {
+          "none_ms": 500
+        }
+      ]
+    },
+    {
+      "id": "joker",
+      "doc": "joker earned",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "SyncJokersQuizStateMessage",
+            "NumJokers": 3
+          }
+        },
+        {
+          "msg": {
+            "TypeString": "ClientJokerCommandMessage",
+            "action": 2,
+            "time": -1.0,
+            "PreNumJokers": 2,
+            "CurNumJokers": 3
+          }
+        }
+      ],
+      "screen": "joker",
+      "expect": [
+        {
+          "none_ms": 500
+        }
+      ]
+    },
+    {
+      "id": "manifest",
+      "doc": "portraits Required",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientHoldingScreenCommandMessage",
+            "action": 5,
+            "time": 0.0,
+            "HoldingScreenText": "",
+            "HoldingScreenType": 4,
+            "OtherPlayerIndex": -1,
+            "ShowPortraitPhotoControls": false
+          }
+        },
+        {
+          "msg": {
+            "TypeString": "QuestionDataMessage",
+            "RoundType": 2,
+            "QuestionText": "Who sings in the shower?"
+          }
+        },
+        {
+          "manifest": [
+            {
+              "image": "p1",
+              "r": 1
+            },
+            {
+              "image": "p2",
+              "r": 1
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "msg": "RequestResourceMessage",
+          "fields": {
+            "ResourceGUID": "$guid:p1"
+          }
+        },
+        {
+          "msg": "RequestResourceMessage",
+          "fields": {
+            "ResourceGUID": "$guid:p2"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "type": "array"
+            }
+          }
+        }
+      ],
+      "order": "any",
+      "timeout_ms": 15000
+    },
+    {
+      "id": "vote",
+      "doc": "pick, toggle the joker, confirm",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientAnswerCommandMessage",
+            "action": 3,
+            "time": 0.0,
+            "roundID": 2,
+            "questionBarText": "Who sings in the shower?",
+            "jokersEnabled": true,
+            "ImageGUIDs": [
+              "$guid:p1",
+              "$guid:p2"
+            ]
+          }
+        }
+      ],
+      "screen": "answer",
+      "variant": "portraits",
+      "page": [
+        {
+          "do": "tap",
+          "target": "answer-1"
+        },
+        {
+          "do": "tap",
+          "target": "joker-toggle"
+        },
+        {
+          "do": "tap",
+          "target": "answer-confirm"
+        }
+      ],
+      "expect": [
+        {
+          "msg": "AnswerIndexResponseMessage",
+          "fields": {
+            "AnswerIndex": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "pause-again",
+      "doc": "Pause does not replace the screen",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 29,
+            "time": 0.0
+          }
+        }
+      ],
+      "screen": "holding",
+      "variant": "general",
+      "expect": [
+        {
+          "none_ms": 300
+        }
+      ]
+    },
+    {
+      "id": "send-joker",
+      "doc": "SendJoker with the toggle on (while paused)",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 17,
+            "time": 0.0
+          }
+        }
+      ],
+      "expect": [
+        {
+          "msg": "JokerConsumedResponseMessage",
+          "fields": {
+            "Response": 2,
+            "jokerConsumed": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "unpause-again",
+      "doc": "Unpause",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 30,
+            "time": 0.0
+          }
+        }
+      ],
+      "expect": [
+        {
+          "none_ms": 300
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "schema": 1,
+  "name": "join",
+  "description": "Tap PLAY, join handshake, assignment burst, look at the TV.",
+  "players": 1,
+  "auto": {
+    "join": true,
+    "resources": true,
+    "session_id": 4242,
+    "jokers": 2,
+    "refuse": 0,
+    "pending_ms": 0
+  },
+  "steps": [
+    {
+      "id": "join",
+      "doc": "player 0 taps PLAY: hello, join handshake, assignment burst, empty manifest",
+      "player": 0,
+      "screen": "connect",
+      "page": [
+        {
+          "do": "tap",
+          "target": "connect-play"
+        }
+      ],
+      "expect": [
+        {
+          "frame": "hello"
+        },
+        {
+          "msg": "ClientRequestPlayerIDMessage",
+          "fields": {
+            "UID": "$uid:0"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "eq": []
+            }
+          }
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "joined",
+      "doc": "the joined screen after the assignment",
+      "player": 0,
+      "screen": "joined",
+      "expect": [
+        {
+          "none_ms": 500
+        }
+      ]
+    },
+    {
+      "id": "look-at-tv",
+      "doc": "LOOK_AT_TV holding screen",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientHoldingScreenCommandMessage",
+            "action": 5,
+            "time": 0.0,
+            "HoldingScreenText": "",
+            "HoldingScreenType": 4,
+            "OtherPlayerIndex": -1,
+            "ShowPortraitPhotoControls": false
+          }
+        }
+      ],
+      "screen": "holding",
+      "variant": "look-at-tv",
+      "expect": [
+        {
+          "none_ms": 500
+        }
+      ]
+    }
+  ]
+}

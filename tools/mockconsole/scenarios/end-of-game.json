@@ -1,0 +1,283 @@
+{
+  "schema": 1,
+  "name": "end-of-game",
+  "description": "End of game back to joined, then EditProfile shows the pre-filled confirm screen.",
+  "players": 1,
+  "auto": {
+    "join": true,
+    "resources": true,
+    "session_id": 4242,
+    "jokers": 2,
+    "refuse": 0,
+    "pending_ms": 0
+  },
+  "steps": [
+    {
+      "id": "join",
+      "doc": "player 0 taps PLAY: hello, join handshake, assignment burst, empty manifest",
+      "player": 0,
+      "screen": "connect",
+      "page": [
+        {
+          "do": "tap",
+          "target": "connect-play"
+        }
+      ],
+      "expect": [
+        {
+          "frame": "hello"
+        },
+        {
+          "msg": "ClientRequestPlayerIDMessage",
+          "fields": {
+            "UID": "$uid:0"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "eq": []
+            }
+          }
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "edit-profile",
+      "doc": "EditProfile: DeviceInfo, then the name screen",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 31,
+            "time": 0.0
+          }
+        }
+      ],
+      "screen": "name",
+      "page": [
+        {
+          "do": "type",
+          "target": "name-input",
+          "text": "Alice"
+        },
+        {
+          "do": "tap",
+          "target": "name-next"
+        }
+      ],
+      "expect": [
+        {
+          "msg": "DeviceInfoMessage",
+          "fields": {
+            "Response": 10,
+            "DeviceSize": {
+              "in": [
+                1,
+                2,
+                3
+              ]
+            },
+            "DeviceOS": {
+              "in": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ]
+            },
+            "DeviceUID": "$uid:0",
+            "DeviceModel": {
+              "type": "string"
+            },
+            "DeviceType": {
+              "in": [
+                "Handheld",
+                "Desktop"
+              ]
+            },
+            "DeviceOperatingSystem": {
+              "nonempty": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "card",
+      "doc": "pick card 3",
+      "player": 0,
+      "screen": "card",
+      "page": [
+        {
+          "do": "tap",
+          "target": "card-3"
+        },
+        {
+          "do": "tap",
+          "target": "card-confirm"
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "selfie",
+      "doc": "take the selfie",
+      "player": 0,
+      "screen": "selfie",
+      "page": [
+        {
+          "do": "tap",
+          "target": "shutter"
+        },
+        {
+          "do": "tap",
+          "target": "use"
+        }
+      ],
+      "expect": [],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "confirm",
+      "doc": "confirm: portrait upload, FX info, profile",
+      "player": 0,
+      "screen": "confirm",
+      "page": [
+        {
+          "do": "tap",
+          "target": "profile-confirm"
+        }
+      ],
+      "expect": [
+        {
+          "upload": {
+            "ImgType": 2,
+            "width": 480,
+            "height": 640,
+            "maxBytes": 128000
+          },
+          "capture": "portrait"
+        },
+        {
+          "msg": "TrophyPhotoFXInfoMessage",
+          "fields": {
+            "ImageGUID": "$cap:portrait",
+            "usesFX": {
+              "type": "bool"
+            }
+          }
+        },
+        {
+          "msg": "ClientPlayerProfileMessage",
+          "fields": {
+            "playerName": "Alice",
+            "uppercasePlayerName": "ALICE",
+            "deviceCultureName": {
+              "nonempty": true
+            },
+            "isGuest": 0,
+            "playerCardId": "CARD_3",
+            "ugcInfo": {
+              "type": "object"
+            }
+          }
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "end",
+      "doc": "scenario -1, front-end game id, EndOfGameMessage",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientScenarioTransitionCommandMessage",
+            "action": 9,
+            "time": 0.0,
+            "Scenario": -1
+          }
+        },
+        {
+          "msg": {
+            "TypeString": "ClientGameIDMessage",
+            "GameID": "1b2c3d4e-front-end"
+          }
+        },
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 15,
+            "time": 0.0
+          }
+        }
+      ],
+      "screen": "joined",
+      "expect": [
+        {
+          "none_ms": 500
+        }
+      ]
+    },
+    {
+      "id": "edit-again",
+      "doc": "EditProfile with a finished profile: pre-filled confirm",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 31,
+            "time": 0.0
+          }
+        }
+      ],
+      "screen": "confirm",
+      "page": [
+        {
+          "do": "tap",
+          "target": "profile-confirm"
+        }
+      ],
+      "expect": [
+        {
+          "msg": "DeviceInfoMessage",
+          "fields": {
+            "Response": 10,
+            "DeviceUID": "$uid:0"
+          }
+        },
+        {
+          "upload": {
+            "ImgType": 2,
+            "width": 480,
+            "height": 640,
+            "maxBytes": 128000
+          },
+          "capture": "portrait2"
+        },
+        {
+          "msg": "TrophyPhotoFXInfoMessage",
+          "fields": {
+            "ImageGUID": "$cap:portrait2"
+          }
+        },
+        {
+          "msg": "ClientPlayerProfileMessage",
+          "fields": {
+            "playerName": "Alice",
+            "playerCardId": "CARD_3",
+            "isGuest": 0
+          }
+        }
+      ],
+      "timeout_ms": 20000
+    }
+  ]
+}

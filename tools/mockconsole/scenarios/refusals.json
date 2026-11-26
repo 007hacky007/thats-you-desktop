@@ -1,0 +1,150 @@
+{
+  "schema": 1,
+  "name": "refusals",
+  "description": "Join refused with reasons 1, 2 and 3, then accepted.",
+  "players": 1,
+  "auto": {
+    "join": true,
+    "resources": true,
+    "session_id": 4242,
+    "jokers": 2,
+    "refuse": 0,
+    "pending_ms": 0
+  },
+  "steps": [
+    {
+      "id": "refuse-1",
+      "doc": "join refused with reason 1",
+      "player": 0,
+      "auto": {
+        "refuse": 1
+      },
+      "screen": "connect",
+      "page": [
+        {
+          "do": "tap",
+          "target": "connect-play"
+        }
+      ],
+      "expect": [
+        {
+          "frame": "hello"
+        },
+        {
+          "closed": true
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "refuse-2",
+      "doc": "join refused with reason 2",
+      "player": 0,
+      "auto": {
+        "refuse": 2
+      },
+      "screen": "connect",
+      "page": [
+        {
+          "do": "expect_visible",
+          "target": "popup",
+          "timeout_ms": 5000
+        },
+        {
+          "do": "tap",
+          "target": "popup-close"
+        },
+        {
+          "do": "tap",
+          "target": "connect-play"
+        }
+      ],
+      "expect": [
+        {
+          "frame": "hello"
+        },
+        {
+          "closed": true
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "refuse-3",
+      "doc": "join refused with reason 3",
+      "player": 0,
+      "auto": {
+        "refuse": 3
+      },
+      "screen": "connect",
+      "page": [
+        {
+          "do": "expect_visible",
+          "target": "popup",
+          "timeout_ms": 5000
+        },
+        {
+          "do": "tap",
+          "target": "popup-close"
+        },
+        {
+          "do": "tap",
+          "target": "connect-play"
+        }
+      ],
+      "expect": [
+        {
+          "frame": "hello"
+        },
+        {
+          "closed": true
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "accept",
+      "doc": "join accepted after the refusals",
+      "player": 0,
+      "auto": {
+        "refuse": 0
+      },
+      "screen": "connect",
+      "page": [
+        {
+          "do": "expect_visible",
+          "target": "popup",
+          "timeout_ms": 5000
+        },
+        {
+          "do": "tap",
+          "target": "popup-close"
+        },
+        {
+          "do": "tap",
+          "target": "connect-play"
+        }
+      ],
+      "expect": [
+        {
+          "frame": "hello"
+        },
+        {
+          "msg": "ClientRequestPlayerIDMessage",
+          "fields": {
+            "UID": "$uid:0"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "eq": []
+            }
+          }
+        }
+      ],
+      "timeout_ms": 20000
+    }
+  ]
+}

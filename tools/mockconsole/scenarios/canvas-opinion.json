@@ -1,0 +1,304 @@
+{
+  "schema": 1,
+  "name": "canvas-opinion",
+  "description": "Canvas Opinion: draw on a 480x640 question image, SendDrawing, vote.",
+  "players": 1,
+  "auto": {
+    "join": true,
+    "resources": true,
+    "session_id": 4242,
+    "jokers": 2,
+    "refuse": 0,
+    "pending_ms": 0
+  },
+  "images": {
+    "co1": {
+      "w": 480,
+      "h": 640,
+      "color": "#cc9933",
+      "label": "CO"
+    },
+    "co2": {
+      "w": 384,
+      "h": 512,
+      "color": "#3399cc",
+      "label": "CO2"
+    }
+  },
+  "steps": [
+    {
+      "id": "join",
+      "doc": "player 0 taps PLAY: hello, join handshake, assignment burst, empty manifest",
+      "player": 0,
+      "screen": "connect",
+      "page": [
+        {
+          "do": "tap",
+          "target": "connect-play"
+        }
+      ],
+      "expect": [
+        {
+          "frame": "hello"
+        },
+        {
+          "msg": "ClientRequestPlayerIDMessage",
+          "fields": {
+            "UID": "$uid:0"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "eq": []
+            }
+          }
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "manifest",
+      "doc": "question data and the canvas image",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientHoldingScreenCommandMessage",
+            "action": 5,
+            "time": 0.0,
+            "HoldingScreenText": "",
+            "HoldingScreenType": 4,
+            "OtherPlayerIndex": -1,
+            "ShowPortraitPhotoControls": false
+          }
+        },
+        {
+          "msg": {
+            "TypeString": "QuestionDataMessage",
+            "RoundType": 8,
+            "QuestionText": "What is this person thinking?"
+          }
+        },
+        {
+          "manifest": [
+            {
+              "image": "co1",
+              "r": 1
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "msg": "RequestResourceMessage",
+          "fields": {
+            "ResourceGUID": "$guid:co1"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "type": "array"
+            }
+          }
+        }
+      ],
+      "order": "any",
+      "timeout_ms": 15000
+    },
+    {
+      "id": "draw",
+      "doc": "draw on the canvas",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientStartDrawingCommandMessage",
+            "action": 7,
+            "time": 0.0,
+            "CanvasGUID": "$guid:co1"
+          }
+        }
+      ],
+      "screen": "draw",
+      "variant": "canvas",
+      "page": [
+        {
+          "do": "draw",
+          "target": "draw-canvas",
+          "points": [
+            [
+              0.2,
+              0.2
+            ],
+            [
+              0.8,
+              0.3
+            ],
+            [
+              0.5,
+              0.8
+            ]
+          ],
+          "steps": 12
+        },
+        {
+          "do": "tap",
+          "target": "tool-spray"
+        },
+        {
+          "do": "tap",
+          "target": "size-3"
+        },
+        {
+          "do": "draw",
+          "target": "draw-canvas",
+          "points": [
+            [
+              0.2,
+              0.2
+            ],
+            [
+              0.8,
+              0.3
+            ],
+            [
+              0.5,
+              0.8
+            ]
+          ],
+          "steps": 12
+        },
+        {
+          "do": "tap",
+          "target": "draw-confirm"
+        }
+      ],
+      "expect": [
+        {
+          "none_ms": 1000
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "send-drawing",
+      "doc": "SendDrawing",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientQuizCommandMessage",
+            "action": 19,
+            "time": 0.0
+          }
+        }
+      ],
+      "screen": "holding",
+      "variant": "look-at-tv",
+      "expect": [
+        {
+          "upload": {
+            "ImgType": 1,
+            "width": 384,
+            "height": 512,
+            "maxBytes": 128000
+          },
+          "capture": "co_draw"
+        },
+        {
+          "msg": "TrophyDrawingColouringInfoMessage",
+          "fields": {
+            "ImageGUID": "$cap:co_draw",
+            "ColoursAvailable": 32766,
+            "ColoursUsed": {
+              "ge": 0
+            }
+          }
+        }
+      ],
+      "timeout_ms": 20000
+    },
+    {
+      "id": "vote-manifest",
+      "doc": "drawings Required",
+      "player": 0,
+      "send": [
+        {
+          "manifest": [
+            {
+              "image": "co2",
+              "r": 1
+            },
+            {
+              "guid": "$cap:co_draw",
+              "r": 1
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "msg": "RequestResourceMessage",
+          "fields": {
+            "ResourceGUID": "$guid:co2"
+          }
+        },
+        {
+          "msg": "AllResourcesReceivedMessage",
+          "fields": {
+            "Requirements": {
+              "type": "array"
+            }
+          }
+        }
+      ],
+      "order": "any",
+      "timeout_ms": 15000
+    },
+    {
+      "id": "vote",
+      "doc": "drawing vote",
+      "player": 0,
+      "send": [
+        {
+          "msg": {
+            "TypeString": "ClientAnswerCommandMessage",
+            "action": 3,
+            "time": 0.0,
+            "roundID": 8,
+            "questionBarText": "What is this person thinking?",
+            "jokersEnabled": false,
+            "ImageGUIDs": [
+              "$cap:co_draw",
+              "$guid:co2"
+            ]
+          }
+        }
+      ],
+      "screen": "answer",
+      "variant": "drawings",
+      "page": [
+        {
+          "do": "tap",
+          "target": "answer-2"
+        },
+        {
+          "do": "tap",
+          "target": "answer-confirm"
+        }
+      ],
+      "expect": [
+        {
+          "msg": "AnswerIndexResponseMessage",
+          "fields": {
+            "AnswerIndex": 2
+          }
+        }
+      ]
+    }
+  ]
+}
