@@ -7,19 +7,45 @@
 // unqualified `Input.X` in Assembly-CSharp binds to this class instead, without touching game
 // code. Each member forwards to UnityEngine.Input and, for keys, buttons and axes, merges in
 // what PortDebug.PortInput is injecting. With nothing injected the behaviour is unchanged.
+//
+// GetKey*(KeyCode) and GetKey*(string) also apply the always-on keyboard aliases of the pad
+// buttons from PortPad.PortPadKeyboard (Return/Space = Cross, Escape = Circle, O/Tab = Options):
+// a pad button and its alias keys act as one combined button.
 
 using UnityEngine;
 
 public static class Input
 {
     // keys -------------------------------------------------------------------------------
-    public static bool GetKey(KeyCode key) { return UnityEngine.Input.GetKey(key) || PortDebug.PortInput.Key(key); }
-    public static bool GetKeyDown(KeyCode key) { return UnityEngine.Input.GetKeyDown(key) || PortDebug.PortInput.KeyDown(key); }
-    public static bool GetKeyUp(KeyCode key) { return UnityEngine.Input.GetKeyUp(key) || PortDebug.PortInput.KeyUp(key); }
+    // raw single-key state: real input merged with scripted input
+    static readonly System.Func<KeyCode, bool> s_Held = k => UnityEngine.Input.GetKey(k) || PortDebug.PortInput.Key(k);
+    static readonly System.Func<KeyCode, bool> s_Down = k => UnityEngine.Input.GetKeyDown(k) || PortDebug.PortInput.KeyDown(k);
+    static readonly System.Func<KeyCode, bool> s_Up = k => UnityEngine.Input.GetKeyUp(k) || PortDebug.PortInput.KeyUp(k);
 
-    public static bool GetKey(string name) { return UnityEngine.Input.GetKey(name) || PortDebug.PortInput.Key(PortDebug.PortInput.KeyFromName(name)); }
-    public static bool GetKeyDown(string name) { return UnityEngine.Input.GetKeyDown(name) || PortDebug.PortInput.KeyDown(PortDebug.PortInput.KeyFromName(name)); }
-    public static bool GetKeyUp(string name) { return UnityEngine.Input.GetKeyUp(name) || PortDebug.PortInput.KeyUp(PortDebug.PortInput.KeyFromName(name)); }
+    public static bool GetKey(KeyCode key) { return PortPad.PortPadKeyboard.Held(key, s_Held); }
+    public static bool GetKeyDown(KeyCode key) { return PortPad.PortPadKeyboard.Down(key, s_Held, s_Down, s_Up); }
+    public static bool GetKeyUp(KeyCode key) { return PortPad.PortPadKeyboard.Up(key, s_Held, s_Up); }
+
+    public static bool GetKey(string name)
+    {
+        KeyCode k = PortDebug.PortInput.KeyFromName(name);
+        if (PortPad.PortPadKeyboard.HasAliases(k)) return GetKey(k);
+        return UnityEngine.Input.GetKey(name) || PortDebug.PortInput.Key(k);
+    }
+
+    public static bool GetKeyDown(string name)
+    {
+        KeyCode k = PortDebug.PortInput.KeyFromName(name);
+        if (PortPad.PortPadKeyboard.HasAliases(k)) return GetKeyDown(k);
+        return UnityEngine.Input.GetKeyDown(name) || PortDebug.PortInput.KeyDown(k);
+    }
+
+    public static bool GetKeyUp(string name)
+    {
+        KeyCode k = PortDebug.PortInput.KeyFromName(name);
+        if (PortPad.PortPadKeyboard.HasAliases(k)) return GetKeyUp(k);
+        return UnityEngine.Input.GetKeyUp(name) || PortDebug.PortInput.KeyUp(k);
+    }
 
     public static bool anyKey { get { return UnityEngine.Input.anyKey || PortDebug.PortInput.AnyKey; } }
     public static bool anyKeyDown { get { return UnityEngine.Input.anyKeyDown || PortDebug.PortInput.AnyKeyDown; } }
