@@ -1,11 +1,15 @@
 /* Play screens (U6): answer, draw, text, selfie, photo, mimic and their components.
    Neutral style first; art (polaroid, text card, joker, sprites) is layered on
-   through the assets helpers (.has-art backgrounds set from JS). */
+   through the assets helpers (.has-art backgrounds set from JS).
+   Ink rule: every light surface (paper card, pill, toggle, round button) sets
+   an explicit dark ink from --play-ink-strong; text on the page background
+   uses --play-on-bg. Icons draw with currentColor, so buttons set color. */
 
 :root {
-  --play-ink-strong: var(--fg, #1c1c22);
-  --play-paper: var(--surface, #ffffff);
-  --play-muted: var(--muted, #6b6b76);
+  --play-ink-strong: #1c1c22;
+  --play-paper: #ffffff;
+  --play-muted: #5d5d68;
+  --play-on-bg: var(--fg, #f6f7fb);
   --play-accent: var(--accent, #ffcc00);
   --play-accent-ink: var(--accent-ink, #1c1c22);
   --play-line: rgba(0, 0, 0, 0.14);
@@ -13,6 +17,9 @@
   --play-radius: 14px;
   --play-gap: 12px;
 }
+/* custom properties resolve where they are declared, so mode overrides live on body */
+body.neutral { --play-ink-strong: #1c1c22; --play-on-bg: var(--fg, #f6f7fb); }
+body.art { --play-ink-strong: var(--panel-fg, #1d1d1d); --play-on-bg: #ffffff; }
 
 .play-screen {
   box-sizing: border-box;
@@ -169,24 +176,26 @@
   text-align: center;
   white-space: pre-line;
   overflow-wrap: anywhere;
+  color: var(--play-ink-strong);
 }
 .play-choice-text.has-art, .play-choice.play-choice-text.has-art { background-color: transparent; box-shadow: none; }
 
 /* joker switch */
 .play-joker { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 14px; width: 100%; }
 .play-joker[hidden] { display: none; }
-.play-joker-toggle { border-radius: var(--play-radius); padding: 6px 12px; }
+.play-joker-toggle { border-radius: var(--play-radius); padding: 6px 12px; background: var(--play-paper); color: var(--play-ink-strong); }
 .play-joker-art { width: 34px; height: 46px; border-radius: 4px; background: #d23 center / contain no-repeat; }
 .play-joker-art.has-art { background-color: transparent; }
-.play-joker-label { font-family: var(--font-heading, system-ui, sans-serif); font-weight: 800; }
+.play-joker-label { font-family: var(--font-heading, system-ui, sans-serif); font-weight: 800; color: var(--play-ink-strong); }
 .play-switch { position: relative; width: 46px; height: 26px; border-radius: 13px; background: #c9c9cf; transition: background 0.15s; }
 .play-switch-knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); transition: left 0.15s; }
 .play-joker-toggle[aria-checked="true"] .play-switch { background: #2bb24c; }
 .play-joker-toggle[aria-checked="true"] .play-switch-knob { left: 23px; }
-.play-joker-count { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 12px; line-height: 1.1; }
+.play-joker-count { color: var(--play-on-bg); display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 12px; line-height: 1.1; }
 .play-joker-num { font-size: 26px; font-family: var(--font-heading, system-ui, sans-serif); }
 .play-joker-remain { white-space: pre-line; }
-.play-joker-hint { flex-basis: 100%; margin: 0; font-size: 13px; text-align: center; color: var(--play-muted); }
+.play-joker-hint { flex-basis: 100%; margin: 0; font-size: 14px; font-weight: 600; text-align: center; color: var(--play-on-bg); }
+body.art .play-joker-count, body.art .play-joker-hint { text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
 
 /* camera */
 .play-photo .play-title { min-height: 1.2em; }
@@ -218,6 +227,7 @@
 .play-cam-caption[hidden] { display: none; }
 .play-cam-bar { display: flex; align-items: center; justify-content: center; gap: 28px; width: 100%; }
 .play-cam-bar[hidden] { display: none; }
+.play-cam-shutter, .play-cam-side, .play-cam-retake { background: var(--play-paper); color: var(--play-ink-strong); }
 .play-cam-shutter { width: 76px; height: 76px; border-radius: 50%; border-width: 5px; border-color: var(--play-ink-strong); }
 .play-cam-shutter svg { width: 32px; height: 32px; }
 .play-cam-side { width: 52px; height: 52px; padding: 0; border-radius: 50%; }
@@ -255,24 +265,46 @@
 }
 .play-draw-paper.has-art { background-color: transparent; box-shadow: none; }
 .play-draw-paper.is-loading .play-draw-canvas { opacity: 0.7; }
-.play-draw-canvas { display: block; width: 100%; height: auto; aspect-ratio: 3 / 4; background: #fff; touch-action: none; }
+/* the paper of the Canvas Opinion variant also carries .play-draw-canvas, so the
+   canvas rules are scoped to the child */
+.play-draw-paper > .play-draw-canvas { display: block; width: 100%; height: auto; aspect-ratio: 3 / 4; background: #fff; touch-action: none; }
+
+/* Canvas Opinion: the newspaper clipping art (1024x1024 texture) uses only its
+   top-left 716x978 px; the inner frame (yellow line) spans x 76..650, y 78..836.
+   The paper takes the clipping's aspect, the texture is scaled so 716 px fill the
+   paper width, and the 3:4 canvas sits centred in the inner frame. Percentages of
+   left/top/width resolve against the paper (the containing block). */
+.play-draw-paper.play-draw-canvas.has-art {
+  width: min(100%, calc((100dvh - 330px) * 0.732));
+  aspect-ratio: 716 / 978;
+  padding: 0;
+  background-size: 143.017% auto;
+  background-position: 0 0;
+}
+.play-draw-paper.play-draw-canvas.has-art > .play-draw-canvas {
+  position: absolute;
+  left: 11.17%;
+  top: 8.18%;
+  width: 79%;
+}
 .play-toolbar { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .play-palette { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; width: 100%; max-width: 330px; margin: 0 auto; }
 .play-swatch {
   aspect-ratio: 1; min-height: 34px; border: 2px solid rgba(0, 0, 0, 0.25); border-radius: 50%; padding: 0; cursor: pointer;
   touch-action: manipulation; -webkit-tap-highlight-color: transparent;
 }
-.play-swatch.is-selected { outline: 3px solid var(--play-ink-strong); outline-offset: 2px; }
+.play-swatch.is-selected { outline: 3px solid var(--play-on-bg); outline-offset: 2px; }
 .play-swatch:disabled { opacity: 0.4; }
 .play-tools { display: flex; align-items: center; justify-content: center; gap: 4px; flex-wrap: wrap; }
 .play-tools-gap { width: 4px; }
+.play-tool, .play-size { background: var(--play-paper); color: var(--play-ink-strong); }
 .play-tool { width: 42px; height: 42px; min-width: 42px; min-height: 42px; padding: 0; border-radius: 50%; }
-.play-tool.is-selected { background: var(--play-accent); border-color: var(--play-ink-strong); }
+.play-tool.is-selected { background: var(--play-accent); color: var(--play-accent-ink); border-color: var(--play-ink-strong); }
 .play-size { width: 42px; height: 42px; min-width: 42px; min-height: 42px; padding: 0; border-radius: 50%; }
 .play-size.is-selected { border-color: var(--play-ink-strong); }
-.play-size-dot { display: block; border-radius: 50%; background: var(--play-ink, #000); }
+.play-size-dot { display: block; border-radius: 50%; background: var(--play-ink, var(--play-ink-strong)); }
 .play-toolbar[data-tool="eraser"] .play-size-dot { background: #fff; border: 2px solid #888; }
-.play-flick-tab { width: 56px; height: 48px; display: flex; align-items: center; justify-content: center; touch-action: none; opacity: 0.55; }
+.play-flick-tab { color: var(--play-on-bg); width: 56px; height: 48px; display: flex; align-items: center; justify-content: center; touch-action: none; opacity: 0.55; }
 .play-flick-arrow { width: 16px; height: 16px; border-left: 4px solid currentColor; border-top: 4px solid currentColor; transform: rotate(45deg) translate(3px, 3px); }
 
 /* text entry */
