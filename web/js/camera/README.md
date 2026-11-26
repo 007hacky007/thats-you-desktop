@@ -21,6 +21,12 @@ Modules: `camera.js` (getUserMedia, flip, 10 s delayed release),
   `whenReady()` (resolves when the current effect's map is loaded), `preload()`
   (load all maps). While a map is loading the frame is drawn without effect.
   `setEffect` returns the effect id now in use.
+- `release()` during a start or flip that is still in flight (permission
+  prompt up) still schedules the 10 s release; a stream that arrives after the
+  release fired is stopped at once and that start rejects with `AbortError`.
+- `capture({ mapWaitMs })` waits up to 2 s (default) for the current effect's
+  map, then draws; `usesFX` is the effect actually baked into the JPEG (false
+  when the map was not ready or the effect's program failed to compile).
 - Drawing surface: `setBackground` resolves `true` when shown and `false` when
   the image failed (white background then); `isEmpty` is true while no brush or
   spray stroke is present (eraser strokes alone do not count); `export()` also

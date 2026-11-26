@@ -28,6 +28,8 @@ export const EFFECTS = Object.freeze(RAW_EFFECTS.map((e) => Object.freeze({
 
 export const effectById = (id) => EFFECTS.find((e) => e.id === id) || null;
 
+export const CAPTURE_MAP_WAIT_MS = 2000;
+
 const GL_OPTIONS = {
   alpha: false, depth: false, stencil: false, antialias: false,
   premultipliedAlpha: false, preserveDrawingBuffer: true,
@@ -118,6 +120,7 @@ export function createRenderer({
   const ctx2d = gl ? null : canvas.getContext('2d');
   let camera = null;
   let effectId = 0;
+  let drawnEffect = 0; // effect actually drawn in the last rendered frame
   let running = false;
   let frameReq = null;
   let lost = false;
@@ -229,6 +232,7 @@ export function createRenderer({
       gl.uniform2f(p.u.u_lines, effect.lines[0], effect.lines[1]);
     }
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    drawnEffect = effect.id;
     return true;
   }
 
@@ -241,6 +245,7 @@ export function createRenderer({
     }
     ctx2d.drawImage(video, r.sx, r.sy, r.sw, r.sh, 0, 0, width, height);
     ctx2d.restore();
+    drawnEffect = 0;
     return true;
   }
 
@@ -277,6 +282,19 @@ export function createRenderer({
     frameReq = raf ? raf(loop) : null;
   }
 
+  async function waitReady(ms) {
+    if (!gl || ms <= 0) return;
+    let timer = null;
+    try {
+      await Promise.race([
+        api.whenReady(),
+        new Promise((r) => { timer = globalThis.setTimeout(r, ms); }),
+      ]);
+    } catch { /* map failed: the frame is drawn without it */ } finally {
+      if (timer !== null) globalThis.clearTimeout(timer);
+    }
+  }
+
   const api = {
     canvas,
     get webgl() { return !!gl; },
@@ -310,10 +328,14 @@ export function createRenderer({
       if (frameReq !== null && caf) caf(frameReq);
       frameReq = null;
     },
-    async capture() {
+    // usesFX reports the effect baked into this frame, which can be None
+    // when the map is not ready in time or the effect program failed.
+    async capture({ mapWaitMs = CAPTURE_MAP_WAIT_MS } = {}) {
+      await waitReady(mapWaitMs);
       if (!render()) throw new Error('no camera frame to capture');
+      const fx = drawnEffect;
       const { jpeg, quality } = await encodeCanvasJpeg(canvas);
-      return { jpeg, quality, usesFX: effectId !== 0 };
+      return { jpeg, quality, usesFX: fx !== 0 };
     },
     destroy() {
       api.stop();

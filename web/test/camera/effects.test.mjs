@@ -116,3 +116,70 @@ test('rear camera is not mirrored', () => {
   assert.ok(!ops.some((o) => o[0] === 'scale'));
   assert.deepEqual(ops.find((o) => o[0] === 'drawImage').slice(2), [0, 160, 720, 960, 0, 0, 480, 640]);
 });
+
+// --- WebGL path with a fake context ---------------------------------------
+function fakeGlDoc({ linkOk = () => true } = {}) {
+  let seq = 0;
+  const calls = [];
+  let compiling = null;
+  const gl = new Proxy({}, {
+    get(t, k) {
+      if (k in t) return t[k];
+      if (typeof k !== 'string') return undefined;
+      if (/^[A-Z_0-9]+$/.test(k)) return k; // constants
+      return (...a) => { calls.push([k, ...a]); return { id: ++seq }; };
+    },
+  });
+  gl.shaderSource = (sh, src) => { if (src.includes('u_')) compiling = src; };
+  gl.getShaderParameter = () => true;
+  gl.getProgramParameter = () => linkOk(compiling);
+  gl.getProgramInfoLog = () => 'fake link error';
+  const document = {
+    createElement() {
+      return {
+        width: 0, height: 0,
+        getContext(type) { return type === 'webgl' ? gl : null; },
+        toBlob(cb) { cb(new Blob([new Uint8Array(100)])); },
+        addEventListener() {},
+      };
+    },
+  };
+  return { document, calls };
+}
+
+const frontCam = () => ({ active: true, facing: 'user', video: { readyState: 4, videoWidth: 640, videoHeight: 480 } });
+const fakeMap = () => ({ width: 2, height: 2, data: new Uint8Array(16), source: 'procedural' });
+
+test('capture waits for a loading map and reports the effect it baked in', async () => {
+  const { document } = fakeGlDoc();
+  let resolveMap;
+  const loadMap = () => new Promise((r) => { resolveMap = () => r(fakeMap()); });
+  const r = createRenderer({ document, raf: null, loadMap });
+  assert.equal(r.webgl, true);
+  r.attach(frontCam());
+  assert.equal(r.setEffect(2), 2);
+  const shot = r.capture({ mapWaitMs: 5000 });
+  resolveMap();
+  assert.equal((await shot).usesFX, true);
+});
+
+test('capture reports no effect when the map is not ready in time', async () => {
+  const { document } = fakeGlDoc();
+  const r = createRenderer({ document, raf: null, loadMap: () => new Promise(() => {}) });
+  r.attach(frontCam());
+  r.setEffect(3);
+  const shot = await r.capture({ mapWaitMs: 5 });
+  assert.equal(shot.usesFX, false);
+});
+
+test('capture reports no effect when the effect program fails', async () => {
+  const { document } = fakeGlDoc({ linkOk: (src) => !(src && src.includes('u_band')) });
+  const r = createRenderer({ document, raf: null, loadMap: async () => fakeMap() });
+  r.attach(frontCam());
+  r.setEffect(1); // Mirror uses u_band
+  assert.equal((await r.capture()).usesFX, false);
+  r.setEffect(6);
+  assert.equal((await r.capture()).usesFX, true);
+  r.setEffect(0);
+  assert.equal((await r.capture()).usesFX, false);
+});
