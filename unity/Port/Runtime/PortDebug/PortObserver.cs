@@ -1,10 +1,13 @@
 // Observation hooks for automated runs of the player. Inert unless the player is started with
 //   -portObserve <dir>          screenshots + event log go to <dir>
-//   -portKeys "<t>:<key>,..."   optional scripted input (see PortKeyScript.cs)
+//   -portKeys "<t>:<key>,..."   optional scripted input (see PortKeyScript.cs); a "<t>:shot"
+//                               entry presses nothing and saves a screenshot (reason "shot") at t
+//   -portShotInterval <sec>     timer screenshot interval (default 2 s, at least 0.1 s)
+//   -portKeyShots               also save a screenshot (reason "key") with each key probe
 //
 // When active it:
 //   * logs "[PortObserve] scene loaded: <name> (index <n>, <mode>) t=<s>" for every scene load;
-//   * saves <dir>/<seq>_<scene>_<reason>.png every 2 s (reason "timer") and on every scene
+//   * saves <dir>/<seq>_<scene>_<reason>.png every 2 s or -portShotInterval (reason "timer") and on every scene
 //     load (reason "scene") through ScreenCapture.CaptureScreenshot;
 //   * appends one JSON object per line to <dir>/log.jsonl: {"t","kind","type","msg"} for scene
 //     loads, screenshots, key presses and every Error / Assert / Exception the player logs;
@@ -30,13 +33,21 @@ namespace PortDebug
     public sealed class PortObserver : MonoBehaviour
     {
         const float k_ShotInterval = 2f;
+        const float k_MinShotInterval = 0.1f;
         const float k_KeyProbeDelay = 0.5f;
+        const string k_ShotKey = "shot";
 
         static PortObserver s_Instance;
 
         string m_Dir;
         int m_Seq;
         float m_NextShot;
+        float m_ShotInterval = k_ShotInterval;
+        bool m_KeyShots;
+        readonly List<float> m_ShotTimes = new List<float>();
+        // one capture request per frame; later ones in the same frame wait for the next frames
+        readonly List<KeyValuePair<string, string>> m_DeferredShots = new List<KeyValuePair<string, string>>();
+        int m_LastShotFrame = -1;
         List<PortKeyEvent> m_Keys = new List<PortKeyEvent>();
         StreamWriter m_Events;
         readonly object m_Lock = new object();
@@ -64,7 +75,45 @@ namespace PortDebug
             go.hideFlags = HideFlags.HideInHierarchy | HideFlags.DontSave;
             DontDestroyOnLoad(go);
             s_Instance = go.AddComponent<PortObserver>();
+            s_Instance.m_KeyShots = HasFlag(args, "-portKeyShots");
+            string interval = Arg(args, "-portShotInterval");
+            if (interval != null)
+            {
+                float v;
+                if (float.TryParse(interval, NumberStyles.Float, CultureInfo.InvariantCulture, out v) && v > 0f)
+                    s_Instance.m_ShotInterval = Mathf.Max(k_MinShotInterval, v);
+                else
+                    Debug.LogWarning("[PortObserve] bad -portShotInterval: " + interval);
+            }
             s_Instance.Init(Path.GetFullPath(dir), Arg(args, "-portKeys"));
+        }
+
+        static bool HasFlag(string[] args, string name)
+        {
+            foreach (string a in args)
+                if (string.Equals(a, name, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            return false;
+        }
+
+        // Moves the "<t>:shot" entries out of the key list into m_ShotTimes; returns the rest.
+        string TakeShotEntries(string keys)
+        {
+            if (string.IsNullOrEmpty(keys)) return keys;
+            var rest = new List<string>();
+            foreach (string raw in keys.Split(','))
+            {
+                string item = raw.Trim();
+                int colon = item.IndexOf(':');
+                float t;
+                if (colon > 0 && string.Equals(item.Substring(colon + 1).Trim(), k_ShotKey, StringComparison.OrdinalIgnoreCase)
+                    && float.TryParse(item.Substring(0, colon), NumberStyles.Float, CultureInfo.InvariantCulture, out t))
+                    m_ShotTimes.Add(t);
+                else if (item.Length > 0)
+                    rest.Add(item);
+            }
+            m_ShotTimes.Sort();
+            return string.Join(",", rest.ToArray());
         }
 
         void Init(string dir, string keys)
@@ -88,12 +137,15 @@ namespace PortDebug
             SceneManager.sceneLoaded += OnSceneLoaded;
 
             var errors = new List<string>();
-            m_Keys = PortKeyScript.Parse(keys, errors);
+            m_Keys = PortKeyScript.Parse(TakeShotEntries(keys), errors);
             foreach (string err in errors)
                 Debug.LogWarning("[PortObserve] -portKeys: " + err);
-            Debug.Log(string.Format("[PortObserve] started: dir={0} keys={1} ({2} events)", m_Dir, keys ?? "-", m_Keys.Count));
-            Event("start", null, "dir=" + m_Dir + " keys=" + (keys ?? ""));
-            m_NextShot = Time.realtimeSinceStartup + k_ShotInterval;
+            Debug.Log(string.Format(CultureInfo.InvariantCulture,
+                                    "[PortObserve] started: dir={0} keys={1} ({2} events, {3} shots) interval={4:0.###}s keyShots={5}",
+                                    m_Dir, keys ?? "-", m_Keys.Count, m_ShotTimes.Count, m_ShotInterval, m_KeyShots));
+            Event("start", null, string.Format(CultureInfo.InvariantCulture, "dir={0} keys={1} interval={2:0.###} keyShots={3}",
+                                               m_Dir, keys ?? "", m_ShotInterval, m_KeyShots));
+            m_NextShot = Time.realtimeSinceStartup + m_ShotInterval;
         }
 
         void OnDestroy()
@@ -111,6 +163,12 @@ namespace PortDebug
         void Update()
         {
             float now = Time.realtimeSinceStartup;
+            if (m_DeferredShots.Count > 0 && Time.frameCount != m_LastShotFrame)
+            {
+                var d = m_DeferredShots[0];
+                m_DeferredShots.RemoveAt(0);
+                Shot(d.Key, d.Value);
+            }
             if (m_Keys.Count > 0)
                 PortKeyScript.Tick(m_Keys, now, OnKey);
             for (int i = 0; i < m_PendingProbes.Count; i++)
@@ -118,11 +176,20 @@ namespace PortDebug
                 if (now < m_PendingProbes[i].Key) continue;
                 string reason = m_PendingProbes[i].Value;
                 m_PendingProbes.RemoveAt(i--);
+                if (m_KeyShots) Shot("key");
                 Probe(reason);
+            }
+            if (m_ShotTimes.Count > 0 && now >= m_ShotTimes[0])
+            {
+                // several entries due in one frame give one screenshot
+                while (m_ShotTimes.Count > 0 && now >= m_ShotTimes[0])
+                    m_ShotTimes.RemoveAt(0);
+                Shot(k_ShotKey);
+                Probe(k_ShotKey);
             }
             if (now >= m_NextShot)
             {
-                m_NextShot = now + k_ShotInterval;
+                m_NextShot = now + m_ShotInterval;
                 Shot("timer");
                 Probe("timer");
             }
@@ -171,6 +238,12 @@ namespace PortDebug
         void Shot(string reason, string sceneName = null)
         {
             string scene = sceneName ?? SceneManager.GetActiveScene().name;
+            if (Time.frameCount == m_LastShotFrame)
+            {
+                m_DeferredShots.Add(new KeyValuePair<string, string>(reason, scene));
+                return;
+            }
+            m_LastShotFrame = Time.frameCount;
             string file = string.Format("{0:0000}_{1}_{2}.png", ++m_Seq, Safe(scene), reason);
             string path = Path.Combine(m_Dir, file);
             try

@@ -9,6 +9,13 @@ Inert unless the player is started with `-portObserve <dir>`. `pipeline/run_play
 | `-portNoImageEffects` | Diagnostic only, default off: disables the camera MonoBehaviours that have `OnRenderImage`, except the ones the game needs to work (see [Render probe](#render-probe)). Works with or without `-portObserve`. |
 | `-portNoImageEffectsOnly <Type,Type>` | With `-portNoImageEffects`: disable only these types. A default-kept type named here is disabled too. |
 | `-portKeepImageEffects <Type,Type>` | With `-portNoImageEffects`: never disable these types, in addition to the default-kept ones. |
+| `-portCameraHdr` | Lighting experiment, default off: `Camera.allowHDR = true` on every camera (see [Badge lighting](#badge-lighting)). |
+| `-portForceForward` | Lighting experiment: `Camera.renderingPath = Forward` on every camera. |
+| `-portNoShadows` | Lighting experiment: `QualitySettings.shadows = ShadowQuality.Disable`. |
+| `-portNoLightShadows <Spot,Point>` | Lighting experiment: `Light.shadows = None` for lights of the listed `LightType`s (`Spot`, `Point`, `Directional`, case-insensitive). |
+| `-portNoEnvFix` | A/B switch: turns off `PortEnvironmentLighting` (skybox reflection, ambient probe, light and reflection probe fixes; see [Environment and lights](#environment-and-lights)). |
+| `-portNoProbeFill` | A/B switch: keeps the reflection and ambient fix but skips the light probe fill and the reflection probe disabling. |
+| `-portNoLightFix` | A/B switch: turns off `PortRealtimeLights`, so lights keep the baked baking output Unity 6 gives them. |
 | `-portSaveDir <dir>` | The save block goes to `<dir>[/<dirName>]/<fileName>` instead of `<Application.persistentDataPath>/SavedGame/...` (see [Fresh save](#fresh-save)). |
 
 Keys:
@@ -101,6 +108,81 @@ Each one left on is logged once as `[PortObserve] -portNoImageEffects: kept <typ
 Use `-portNoImageEffects` to see whether the scene renders underneath the effect chain (UltimateBloom, CinematicEffects DepthOfField, Amplify Occlusion, Amplify Color, Deluxe tonemapper). It changes what the game draws, so never leave it on for behaviour checks.
 
 `pipeline/run_player.py --no-image-effects` passes the switch, `--fx-only <Type,Type>` adds `-portNoImageEffectsOnly` and `--fx-keep <Type,Type>` adds `-portKeepImageEffects` (both need `--no-image-effects`). The summary shows kept effects as `probe-kept` and the lists in its first line. `--render-summary` reads `render.jsonl` after the run and prints, for the last `Home` event, the cameras with their effects, then every shader seen in any `Home` event with where it was used (`cam:<name>`, `fx:<type>`, `ngui`). Shaders are flagged `DUMMY <file>` when their name matches a file under `work/project/Assets/Resources` whose text contains `DummyShaderTextExporter` (the placeholder shaders the export wrote), and `UNSUPPORTED` when `isSupported` was false.
+
+## Environment and lights
+
+Every scene ships a Unity 5.3 LightingDataAsset at version 3, which Unity 6 rejects as below the supported minimum. Two components in `Runtime/Rendering` make up for what that asset held. Both start before the first scene load, work without `-portObserve` and are on by default; their flags exist for A/B runs.
+
+`PortEnvironmentLighting.cs`, one frame after each load of the active scene (after a `DynamicGI.UpdateEnvironment()` and one more frame):
+
+1. Reflection: when the default reflection is Skybox, a skybox is set and `ReflectionProbe.defaultTexture` is missing or under 16 px, it renders the skybox into an HDR cube with mips and installs it as the custom reflection.
+2. Ambient: rebuilds `RenderSettings.ambientProbe` from the Flat colour, the Trilight gradient or the skybox face averages, in linear space and scaled by `ambientIntensity`. A Skybox probe that `DynamicGI.UpdateEnvironment()` already made valid is kept. A zero or NaN probe is always replaced.
+3. Light probes: when the loaded probe set is all zero (every LightProbes asset of the game is), every probe is set to the ambient probe. Sets with real data are left alone. This is checked again after every load and when Unity reports the probes changed.
+4. Reflection probes: Baked or Custom probes without a texture are disabled, so their renderers fall back to the default reflection instead of black.
+
+About 1 s later it checks that the probe and reflection it set are still in place. `-portNoEnvFix` skips all four steps. `-portNoProbeFill` skips only steps 3 and 4.
+
+Log lines in player.log, all prefixed `[PortEnv]`:
+
+| Line | Meaning |
+| --- | --- |
+| `environment lighting fix active (...)` / `disabled by -portNoEnvFix` | start-up state, including whether the probe fill is off |
+| `<scene>: ambientMode=.. reflectionMode=.. skybox=.. defaultTexture=.. probeBefore=ok\|invalid capture=new\|cached reflection=custom <tex>\|kept\|failed\|none ambient=<source> before=dc(..) after=dc(..)` | one per processed scene. `<source>` is `flat`, `trilight`, `skybox`, `fallback flat` or `kept ...`, and `dc(r,g,b)` is the DC colour of the probe |
+| `<scene>: lightProbes filled <n> with ambient dc(..)` / `kept (nonzero) count=<n>` / `left zero (ambient probe invalid ..)` / `none` | the light probe decision (logged when it changes) |
+| `<scene>: disabled <n> reflection probe(s) without a texture ...` | step 4, with the probe names |
+| `<scene>: ambient probe was replaced after it was set` / `custom reflection was replaced after it was set` | warnings from the 1 s check |
+
+`PortRealtimeLights.cs` handles direct light. With the LightingDataAsset gone, `Light.bakingOutput` reports `{Baked, isBaked=true}` for the lights, so Unity skips their direct light and nothing replaces it. While no lightmaps are loaded, it rewrites each such light to a realtime baking output (not baked, `Realtime`, no occlusion mask channel). It runs after every scene load and rescans every 1 s for lights that are added or enabled later. It applies the fix again if something sets a fixed light back. `-portNoLightFix` turns it off. Its player.log lines are prefixed `[PortLights]`:
+
+| Line | Meaning |
+| --- | --- |
+| `realtime light fix active (...)` / `disabled by -portNoLightFix` | start-up state |
+| `<scene>: fixed <n> of <m> lights (was Baked/isBaked)[, <k> fixed earlier][ [rescan]]` | one per loaded scene (also when `n` is 0), and one per rescan that fixed something |
+| `...; lightmaps present (<n>), left as is` | lightmaps were loaded, so nothing was changed |
+
+With `-portObserve`, `PortRenderProbe.cs` also writes an `env` event to `render.jsonl` when a scene loads (`reason` `scene load <name>`) and again 1 s later (`scene <name> +1s`), so the second one shows what the fix changed. Each one is also logged as `[PortObserve] env (<reason>): <json>`.
+
+| Field | Content |
+| --- | --- |
+| `envFix` | `PortEnvironmentLighting.LastStatus`: `<scene>: reflection=<custom tex\|default\|none> ambient=<source\|kept> lightProbesFilled=<n\|off>[ reflectionProbesDisabled=<n>]`, or `off (-portNoEnvFix)` |
+| `ambient` | `mode`, `intensity`, the `light`, `sky`, `equator` and `ground` colours, `probeInvalid` (zero or NaN) and `probe` (27 SH floats, r0..r8, g0..g8, b0..b8) |
+| `reflection` | default reflection `mode`, `resolution`, `intensity`, `bounces`, and the `custom` and `default` textures (`{name,width,height,dimension}` or null) |
+| `lightmaps` | `LightmapSettings.lightmaps` count (0 while the LightingDataAsset is rejected) |
+| `lightProbes` | light probe count, or null without a probe set |
+| `reflectionProbes[]` | `name` (path), `enabled`, `mode`, `importance`, bounds `center` and `size`, `texture` |
+
+The event also has `colorSpace`, `lightsUseLinearIntensity`, `realtimeReflectionProbes`, `skybox`, `sun` and a `badges[]` dump (see below).
+
+## Badge lighting
+
+In the Wish intro (scene `Home`, camera `ButtonCamera`, deferred with HDR off) the badge `WishBadge_NEW_STATIC` sits inside the cone of the two `Home_Root/WishLogo` spot lights but its white face shows no direct light. The `env` badge dump only runs at scene load, while that badge is still inactive, so `PortRenderProbe.cs` also writes a `badge` event to `render.jsonl` every 2 s while a scene named `Home` is loaded (only with `-portObserve`). It covers the active renderers whose name starts with `WishBadge` and the `GroundPlane` renderers under an object named `WishLogo`. A digest `[PortObserve] badge: renderers=<names> shadows=<quality> experiments=<flags>` goes to player.log when it changes (`(hidden)` marks a renderer with `isVisible` false).
+
+```
+{"t":30.1,"kind":"badge","msg":"renderers=WishBadge_NEW_STATIC ...","scene":"Home","experiments":{...},
+ "quality":{...},"lightProbes":0,"ambientDc":[r,g,b],"cameras":[...],"renderers":[...]}
+```
+
+| Field | Content |
+| --- | --- |
+| `experiments` | which lighting experiments are on (`cameraHdr`, `forceForward`, `noShadows`, `noLightShadows`) and `changes`, how many objects or settings each one has changed so far |
+| `quality` | `QualitySettings.shadows`, `shadowDistance`, `shadowProjection`, `pixelLightCount` |
+| `lightProbes`, `ambientDc` | light probe count (null without a probe set) and the DC (L0) term per channel of `RenderSettings.ambientProbe` |
+| `cameras[]` | every enabled camera by depth: `name`, `path`, `enabled`, `depth`, `cullingMask`, `renderingPath` (asked for), `actualRenderingPath`, `allowHDR`, `allowMSAA`, `targetTexture` |
+| `renderers[]` | `path`, `active`, `enabled`, `visible`, `layer`, world bounds `center` and `size`, `shadowCasting`, `receiveShadows`, `lightProbeUsage`, `probeAnchor` (path or null), `probePos` (anchor position, else the bounds centre), `shDc` (DC term of `LightProbes.GetInterpolatedProbe` at `probePos`), `cameras` (enabled cameras whose mask has the layer) |
+| `renderers[].lights[]` | every enabled light in an active object: `name` (path), `type`, `inMask` (its culling mask has the renderer layer), `intensity`, `color`, `range`, `spotAngle`, `distance` to the bounds centre, `inRange`, `inCone` (half the spot angle), `facing` (local +Z face normal dotted with the direction to the light), `renderMode`, `shadows`, `shadowStrength`, `shadowBias`, `shadowNormalBias`, `shadowNearPlane`, `shadowResolution`, `bakeType` and `isBaked` (from `Light.bakingOutput`; a light marked baked adds no realtime light) |
+
+The four lighting experiments are diagnostic switches for finding out what removes the direct light. All are off by default; any one of them starts the probe even without `-portObserve`. Each is applied on every scene load and logged once to player.log as `[PortObserve] <flag>: <what> (<count>, first applied at <reason>)`. Because the game can change these values after the scene loads, the camera ones are applied again in every `LateUpdate` and the quality and light ones every 2 s. They change what the game draws, so never leave them on for behaviour checks.
+
+| Flag | Tests |
+| --- | --- |
+| `-portCameraHdr` | LDR deferred lighting: with HDR on, the light buffer is a float target instead of the encoded LDR one |
+| `-portForceForward` | the deferred path as a whole: forward lighting with the same lights |
+| `-portNoShadows` | shadows of every light (shadow maps fully occluding a small object through bias or near plane) |
+| `-portNoLightShadows Spot` | shadows of only the listed light types |
+
+Finding: the cause is the baking output. The scenes serialise these lights with `m_Lightmapping: 4`. Once Unity 6 rejects the v3 LightingDataAsset, `Light.bakingOutput` reports `bakeType` `Baked` and `isBaked` true for them (every light entry in the `badge` events of the r3c runs). A light marked baked adds no realtime light, and no lightmap supplies it either. The evidence: `r3c-fwd` (`-portForceForward -portNoShadows`) and `r3c-nofx` (`-portNoImageEffects`) look the same, with no direct light on the badge, so neither the deferred path, the shadows nor the effect chain removes the light. `r3c-noenv` (`-portNoEnvFix`) goes black, so the badge only gets the ambient and probe light that `PortEnvironmentLighting` restores. `PortRealtimeLights` (see [Environment and lights](#environment-and-lights)) is the fix, and `-portNoLightFix` turns it off for comparison.
+
+`pipeline/run_player.py --extra "<args>"` appends any player arguments (split like a shell, with `shlex`), for example `--extra '-portCameraHdr'`, `--extra '-portNoLightShadows Spot,Point'` or `--extra '-portNoEnvFix'`. Compare the Wish intro screenshots (about t=28-33 s with `--keys '5:Return'`) and the `badge` events between runs.
 
 ## Fresh save
 

@@ -14,15 +14,28 @@ effects switched off, except the ones the game needs such as MenuRenderer and Sc
 the render probe saw in Home (<run>/shots/render.jsonl), flagging the placeholder shaders exported
 as DummyShaderTextExporter under work/project/Assets/Resources.
 
+The player runs under `caffeinate -d -i -u` (on macOS, unless --no-caffeinate): with the display
+asleep the player blocks in Metal presentation after its first frame. While it runs, a warning is
+printed when no new timer screenshot appears for a while after the first one (a stalled player).
+--shot-interval SEC sets the timer screenshot interval (-portShotInterval, default 2 s);
+--key-shots also saves a screenshot with the probe 0.5 s after each scripted key is released
+(-portKeyShots), and a "<t>:shot" entry in --keys saves one at <t> without pressing anything.
+--extra "<args>" appends arbitrary player arguments, split like a shell would (shlex), e.g.
+--extra '-portNoEnvFix' or --extra '-portNoLightShadows Spot,Point'.
+
 CLI: python3 -m pipeline.run_player [--name NAME] [--seconds 60] [--keys "3:cross,6:down"]
      [--fresh-save] [--no-image-effects [--fx-only T,T] [--fx-keep T,T]] [--render-summary]
+     [--shot-interval SEC] [--key-shots] [--no-caffeinate] [--extra "-flag value ..."]
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import plistlib
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -39,6 +52,11 @@ KEY = re.compile(r"^\d+(\.\d+)?:\S.*$")
 DUMMY_MARK = "DummyShaderTextExporter"
 SHADER_NAME = re.compile(r'^\s*Shader\s+"([^"]+)"', re.M)
 TYPE_NAME = re.compile(r"^[A-Za-z_][\w.+`]*$")
+TIMER_SHOT = "_timer.png"
+MIN_SHOT_INTERVAL = 0.1
+STALL_SECONDS = 8.0
+FIRST_SHOT_GRACE = 20.0
+STALL_HINT = "player stalled - display asleep? see pmset -g log | grep Display"
 
 
 def find_executable(app: Path) -> Path:
@@ -75,10 +93,15 @@ def validate_types(spec: str) -> str:
 
 def player_argv(exe: Path, run_dir: Path, keys: str | None = None, width: int = 1280, height: int = 720,
                 save_dir: Path | None = None, no_image_effects: bool = False, fx_only: str | None = None,
-                fx_keep: str | None = None) -> list[str]:
+                fx_keep: str | None = None, shot_interval: float | None = None,
+                key_shots: bool = False, extra: list[str] | None = None) -> list[str]:
     argv = [str(exe), "-logFile", str(run_dir / "player.log"), "-portObserve", str(run_dir / "shots")]
     if keys:
         argv += ["-portKeys", keys]
+    if shot_interval is not None:
+        argv += ["-portShotInterval", f"{shot_interval:g}"]
+    if key_shots:
+        argv.append("-portKeyShots")
     if save_dir is not None:
         argv += ["-portSaveDir", str(save_dir)]
     if no_image_effects:
@@ -87,7 +110,77 @@ def player_argv(exe: Path, run_dir: Path, keys: str | None = None, width: int = 
             argv += ["-portNoImageEffectsOnly", fx_only]
         if fx_keep:
             argv += ["-portKeepImageEffects", fx_keep]
-    return argv + ["-screen-width", str(width), "-screen-height", str(height), "-screen-fullscreen", "0"]
+    argv += ["-screen-width", str(width), "-screen-height", str(height), "-screen-fullscreen", "0"]
+    return argv + list(extra or [])
+
+
+def split_extra(spec: str | None) -> list[str]:
+    """Split --extra shell-like; raises ValueError on unbalanced quotes."""
+    if not spec:
+        return []
+    return shlex.split(spec)
+
+
+def validate_shot_interval(value: float) -> float:
+    if not value >= MIN_SHOT_INTERVAL:  # also rejects NaN
+        raise ValueError(f"--shot-interval must be at least {MIN_SHOT_INTERVAL} s")
+    return value
+
+
+def caffeinate_argv(pid: int) -> list[str] | None:
+    """Keep the display awake (-d), the system out of idle sleep (-i) and wake the display (-u)
+    until `pid` exits; None where caffeinate does not exist (not macOS)."""
+    exe = shutil.which("caffeinate") if sys.platform == "darwin" else None
+    return [exe, "-d", "-i", "-u", "-w", str(pid)] if exe else None
+
+
+class StallWatch:
+    """Warns when no new timer screenshot appeared for `limit` seconds after the first one, or
+    when none at all appeared within `first` seconds of the launch."""
+
+    def __init__(self, shots: Path, interval: float = 2.0, limit: float = STALL_SECONDS,
+                 first: float = FIRST_SHOT_GRACE):
+        self.shots = Path(shots)
+        self.limit = max(limit, 3 * interval)
+        self.first = max(first, self.limit + interval)
+        self.count = 0
+        self.last_change: float | None = None
+        self.stalled = False
+        self.warnings: list[str] = []
+
+    def timer_shots(self) -> int:
+        try:
+            return sum(1 for n in os.listdir(self.shots) if n.endswith(TIMER_SHOT))
+        except OSError:
+            return 0
+
+    def check(self, now: float, elapsed: float) -> str | None:
+        """Call periodically; returns a warning or recovery line when the state changes."""
+        n = self.timer_shots()
+        if n != self.count:
+            self.count, self.last_change = n, now
+            if self.stalled:
+                self.stalled = False
+                msg = f"t~{elapsed:.0f}s: player resumed ({n} timer shots)"
+                self.warnings.append(msg)
+                return msg
+            return None
+        if self.stalled:
+            return None
+        if self.last_change is None:
+            if elapsed < self.first:
+                return None
+            self.stalled = True
+            msg = f"WARNING t~{elapsed:.0f}s: no timer screenshot yet: {STALL_HINT}"
+            self.warnings.append(msg)
+            return msg
+        if now - self.last_change < self.limit:
+            return None
+        self.stalled = True
+        msg = (f"WARNING t~{elapsed:.0f}s: no new timer screenshot for {now - self.last_change:.0f}s "
+               f"after {n}: {STALL_HINT}")
+        self.warnings.append(msg)
+        return msg
 
 
 def parse_player_log(text: str) -> dict:
@@ -313,32 +406,64 @@ def screenshots(shots: Path) -> list[Path]:
 
 
 def run(exe: Path, run_dir: Path, seconds: float, keys: str | None, fresh_save: bool = False,
-        no_image_effects: bool = False, fx_only: str | None = None, fx_keep: str | None = None) -> int | None:
+        no_image_effects: bool = False, fx_only: str | None = None, fx_keep: str | None = None,
+        shot_interval: float | None = None, key_shots: bool = False, caffeinate: bool = True,
+        warnings: list[str] | None = None, extra: list[str] | None = None) -> int | None:
     (run_dir / "shots").mkdir(parents=True, exist_ok=True)
     save_dir = None
     if fresh_save:
         save_dir = run_dir / "save"
         save_dir.mkdir(parents=True, exist_ok=True)
     argv = player_argv(exe, run_dir, keys, save_dir=save_dir, no_image_effects=no_image_effects,
-                       fx_only=fx_only, fx_keep=fx_keep)
-    print("running:", " ".join(f"'{a}'" if " " in a or "'" in a else a for a in argv), flush=True)
-    proc = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline and proc.poll() is None:
-        time.sleep(0.5)
-    rc = proc.poll()
-    if rc is None:
-        proc.terminate()
-        try:
-            proc.wait(5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-        return None
-    return rc
+                       fx_only=fx_only, fx_keep=fx_keep, shot_interval=shot_interval, key_shots=key_shots,
+                       extra=extra)
+    awake = None
+    caff = caffeinate_argv(os.getpid()) if caffeinate else None
+    if caff:
+        # started before the player so the display is on when it creates its Metal layer;
+        # -w ties it to this script in case the finally below never runs
+        awake = subprocess.Popen(caff, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print("keeping the display awake:", " ".join(caff), flush=True)
+        time.sleep(1.0)
+    elif caffeinate:
+        print("caffeinate not available; a sleeping display can stall the player", flush=True)
+    try:
+        print("running:", " ".join(f"'{a}'" if " " in a or "'" in a else a for a in argv), flush=True)
+        proc = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        watch = StallWatch(run_dir / "shots", interval=shot_interval or 2.0)
+        start = time.monotonic()
+        deadline = start + seconds
+        while time.monotonic() < deadline and proc.poll() is None:
+            time.sleep(0.5)
+            now = time.monotonic()
+            msg = watch.check(now, now - start)
+            if msg:
+                print(msg, flush=True)
+        if warnings is not None:
+            warnings += watch.warnings
+            if watch.stalled:
+                warnings.append(f"still stalled at the end: {STALL_HINT}")
+        rc = proc.poll()
+        if rc is None:
+            proc.terminate()
+            try:
+                proc.wait(5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            return None
+        return rc
+    finally:
+        if awake is not None and awake.poll() is None:
+            awake.terminate()
+            try:
+                awake.wait(5)
+            except subprocess.TimeoutExpired:
+                awake.kill()
 
 
-def report(run_dir: Path, rc: int | None, top: int = 25, dummies: dict[str, str] | None = None) -> str:
+def report(run_dir: Path, rc: int | None, top: int = 25, dummies: dict[str, str] | None = None,
+           warnings: list[str] | None = None) -> str:
     log = run_dir / "player.log"
     p = parse_player_log(log.read_text(errors="replace") if log.is_file() else "")
     events = run_dir / "shots" / "log.jsonl"
@@ -348,6 +473,7 @@ def report(run_dir: Path, rc: int | None, top: int = 25, dummies: dict[str, str]
     shots = screenshots(run_dir / "shots")
     out = ["player " + ("still running at timeout, killed" if rc is None else f"exited with code {rc}")
            + ("; CRASH markers in log" if p["crashed"] else "")]
+    out += [f"  {w}" for w in warnings or []]
     out.append(f"errors/exceptions: {len(problems)} distinct, {sum(problems.values())} total"
                + (" (from observer log.jsonl)" if problems is not p["problems"] else " (from player.log)"))
     out += [f"  (x{n}) {m}" for m, n in problems.most_common(top)]
@@ -375,9 +501,21 @@ def report(run_dir: Path, rc: int | None, top: int = 25, dummies: dict[str, str]
     return "\n".join(out)
 
 
-def main(argv: list[str] | None = None) -> int:
-    from pipeline import config
+def join_extra_values(argv: list[str]) -> list[str]:
+    """Rewrite "--extra X" as "--extra=X": argparse would take a lone "-portFoo" value for an option."""
+    out: list[str] = []
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--extra" and i + 1 < len(argv):
+            out.append("--extra=" + argv[i + 1])
+            i += 2
+        else:
+            out.append(argv[i])
+            i += 1
+    return out
 
+
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--name", default=time.strftime("run-%Y%m%d-%H%M%S"), help="run name (work/runs/<name>)")
     ap.add_argument("--seconds", type=float, default=60.0)
@@ -395,7 +533,22 @@ def main(argv: list[str] | None = None) -> int:
                     help="with --no-image-effects: also keep these types on (-portKeepImageEffects)")
     ap.add_argument("--render-summary", action="store_true",
                     help="print cameras, effects and shaders seen in Home, flagging dummy shaders")
-    a = ap.parse_args(argv)
+    ap.add_argument("--shot-interval", type=float, metavar="SEC",
+                    help="timer screenshot interval in seconds (-portShotInterval; default 2)")
+    ap.add_argument("--key-shots", action="store_true",
+                    help="also save a screenshot 0.5 s after each scripted key is released (-portKeyShots)")
+    ap.add_argument("--no-caffeinate", action="store_true",
+                    help="do not run the player under caffeinate -d -i -u")
+    ap.add_argument("--extra", metavar="ARGS",
+                    help="extra player arguments, split shell-like and appended to the player argv "
+                         "(e.g. --extra '-portCameraHdr -portNoLightShadows Spot')")
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    from pipeline import config
+
+    a = build_parser().parse_args(join_extra_values(sys.argv[1:] if argv is None else list(argv)))
     c = config.load()
     try:
         keys = validate_keys(a.keys) if a.keys else None
@@ -403,6 +556,8 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("--fx-only / --fx-keep need --no-image-effects")
         fx_only = validate_types(a.fx_only) if a.fx_only else None
         fx_keep = validate_types(a.fx_keep) if a.fx_keep else None
+        shot_interval = validate_shot_interval(a.shot_interval) if a.shot_interval is not None else None
+        extra = split_extra(a.extra)
         exe = find_executable(a.app or c.work_dir / "builds" / "mac" / "ThatsYou.app")
     except (ValueError, FileNotFoundError) as e:
         print(e, file=sys.stderr)
@@ -412,9 +567,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"run dir not empty: {run_dir}; pick another --name", file=sys.stderr)
         return 2
     dummies = dummy_shaders(c.work_dir / "project") if a.render_summary else None
+    warnings: list[str] = []
     rc = run(exe, run_dir, a.seconds, keys, fresh_save=a.fresh_save, no_image_effects=a.no_image_effects,
-             fx_only=fx_only, fx_keep=fx_keep)
-    print(report(run_dir, rc, dummies=dummies))
+             fx_only=fx_only, fx_keep=fx_keep, shot_interval=shot_interval, key_shots=a.key_shots,
+             caffeinate=not a.no_caffeinate, warnings=warnings, extra=extra)
+    print(report(run_dir, rc, dummies=dummies, warnings=warnings))
     return 0 if rc in (None, 0) else 1
 
 
