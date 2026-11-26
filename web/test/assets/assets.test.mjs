@@ -193,3 +193,47 @@ test('applySprite sets background styles', async () => {
   assert.equal(el.style.backgroundImage, 'url("art/gui/atlas.png")');
   assert.ok(el.style.backgroundSize.endsWith('%'));
 });
+
+function fakeBody() {
+  const props = {};
+  const classes = new Set();
+  return {
+    props,
+    classes,
+    style: { setProperty(k, v) { props[k] = v; } },
+    classList: { toggle(c, on) { if (on) classes.add(c); else classes.delete(c); } },
+  };
+}
+
+test('applyTheme writes absolute art urls into CSS variables', async () => {
+  const MAN = { ...MANIFEST, ui: { ...MANIFEST.ui, tableTop: 'art/ui/TableTop2_Albedo.png' } };
+  const a = await loadAssets({ fetch: fetchOf({ 'art/manifest.json': MAN }) });
+  const prev = globalThis.document;
+  globalThis.document = { baseURI: 'http://127.0.0.1:8088/' };
+  try {
+    const b = fakeBody();
+    a.applyTheme(b);
+    assert.ok(b.classes.has('art'));
+    assert.equal(b.props['--art-table'], 'url("http://127.0.0.1:8088/art/ui/TableTop2_Albedo.png")');
+    assert.equal(b.props['--art-polaroid'], 'url("http://127.0.0.1:8088/art/ui/blankPolaroid.png")');
+  } finally {
+    if (prev === undefined) delete globalThis.document; else globalThis.document = prev;
+  }
+});
+
+test('applyTheme keeps relative urls without a document', async () => {
+  const MAN = { ...MANIFEST, ui: { ...MANIFEST.ui, tableTop: 'art/ui/TableTop2_Albedo.png' } };
+  const a = await loadAssets({ fetch: fetchOf({ 'art/manifest.json': MAN }) });
+  const b = fakeBody();
+  a.applyTheme(b);
+  assert.equal(b.props['--art-table'], 'url("art/ui/TableTop2_Albedo.png")');
+});
+
+test('applyTheme does not double-encode spaces in absolute urls', async () => {
+  const MAN = { ...MANIFEST, ui: { tableTop: 'art/ui/Table Top.png' } };
+  const a = await loadAssets({ fetch: fetchOf({ 'art/manifest.json': MAN }) });
+  const b = fakeBody();
+  b.ownerDocument = { baseURI: 'https://example.invalid/iwyk/index.html' };
+  a.applyTheme(b);
+  assert.equal(b.props['--art-table'], 'url("https://example.invalid/iwyk/art/ui/Table%20Top.png")');
+});

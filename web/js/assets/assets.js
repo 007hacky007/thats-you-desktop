@@ -76,9 +76,26 @@ export function parseManifest(json) {
   };
 }
 
+// `u` is a page-relative path (gets percent-encoded) or an absolute URL
+// (already encoded, e.g. from new URL().href or a blob: URL).
 export function cssUrl(u) {
-  const enc = String(u).startsWith('blob:') ? String(u) : encodeURI(String(u));
+  const s = String(u);
+  const enc = /^[A-Za-z][A-Za-z0-9+.-]*:/.test(s) ? s : encodeURI(s);
   return `url("${enc.replace(/["\\]/g, (c) => `\\${c}`)}")`;
+}
+
+// Absolute form of a page-relative URL. A relative url() inside a CSS custom
+// property resolves against the stylesheet that uses var(), not the page, so
+// variables must carry absolute URLs. Without a document it stays relative.
+export function absoluteUrl(u, doc = globalThis.document) {
+  const s = String(u);
+  const base = doc && typeof doc.baseURI === 'string' ? doc.baseURI : '';
+  if (!base || s.startsWith('blob:') || s.startsWith('data:')) return s;
+  try {
+    return new URL(s, base).href;
+  } catch {
+    return s;
+  }
 }
 
 function pct(v) {
@@ -232,7 +249,8 @@ function createAssets(manifest, base) {
       b.classList.toggle('art', !!m);
       b.classList.toggle('neutral', !m);
       if (!m) return;
-      const set = (name, u) => { if (u) b.style.setProperty(name, cssUrl(u)); };
+      const doc = b.ownerDocument || globalThis.document;
+      const set = (name, u) => { if (u) b.style.setProperty(name, cssUrl(absoluteUrl(u, doc))); };
       set('--art-table', assets.url('ui.tableTop'));
       set('--art-polaroid', assets.url('ui.polaroid'));
       set('--art-polaroid-light', assets.url('ui.polaroidLight'));
