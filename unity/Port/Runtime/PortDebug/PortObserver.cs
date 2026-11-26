@@ -8,6 +8,10 @@
 //     load (reason "scene") through ScreenCapture.CaptureScreenshot;
 //   * appends one JSON object per line to <dir>/log.jsonl: {"t","kind","type","msg"} for scene
 //     loads, screenshots, key presses and every Error / Assert / Exception the player logs;
+//   * appends a "probe" event with the game's UI state (PortStateProbe.cs: Menu, MenuDisplay,
+//     FrontEndFlow, IWYKLogo, PauseGame and the visible NGUI label texts) on every scene load,
+//     with every timer screenshot and 0.5 s after each scripted key is released, and logs a
+//     "[PortObserve] probe (<reason>): <digest>" line when the digest changes;
 //   * plays the -portKeys schedule into PortInput (merged into Input by InputShim.cs);
 //   * hides the development build's on-screen error console so it does not cover screenshots.
 // Installed with [RuntimeInitializeOnLoadMethod], so no scene is modified.
@@ -26,6 +30,7 @@ namespace PortDebug
     public sealed class PortObserver : MonoBehaviour
     {
         const float k_ShotInterval = 2f;
+        const float k_KeyProbeDelay = 0.5f;
 
         static PortObserver s_Instance;
 
@@ -37,6 +42,8 @@ namespace PortDebug
         readonly object m_Lock = new object();
         readonly System.Diagnostics.Stopwatch m_Clock = System.Diagnostics.Stopwatch.StartNew();
         double m_T0;
+        readonly List<KeyValuePair<float, string>> m_PendingProbes = new List<KeyValuePair<float, string>>();
+        string m_LastSummary;
 
         static string Arg(string[] args, string name)
         {
@@ -106,10 +113,18 @@ namespace PortDebug
             float now = Time.realtimeSinceStartup;
             if (m_Keys.Count > 0)
                 PortKeyScript.Tick(m_Keys, now, OnKey);
+            for (int i = 0; i < m_PendingProbes.Count; i++)
+            {
+                if (now < m_PendingProbes[i].Key) continue;
+                string reason = m_PendingProbes[i].Value;
+                m_PendingProbes.RemoveAt(i--);
+                Probe(reason);
+            }
             if (now >= m_NextShot)
             {
                 m_NextShot = now + k_ShotInterval;
                 Shot("timer");
+                Probe("timer");
             }
         }
 
@@ -119,6 +134,26 @@ namespace PortDebug
             Debug.Log(string.Format(CultureInfo.InvariantCulture, "[PortObserve] {0} t={1:F2} frame={2}",
                                     msg, Time.realtimeSinceStartup, Time.frameCount));
             Event("key", null, msg);
+            if (!down)
+                m_PendingProbes.Add(new KeyValuePair<float, string>(Time.realtimeSinceStartup + k_KeyProbeDelay, "key " + e.spec));
+        }
+
+        // Records the game's UI state; see PortStateProbe.cs for the fields.
+        void Probe(string reason)
+        {
+            string state = PortStateProbe.Capture();
+            string summary = PortStateProbe.Summary();
+            if (summary != m_LastSummary)
+            {
+                m_LastSummary = summary;
+                Debug.Log(string.Format(CultureInfo.InvariantCulture, "[PortObserve] probe ({0}): {1} t={2:F2}",
+                                        reason, summary, Time.realtimeSinceStartup));
+            }
+            var tail = new StringBuilder(state.Length + 32);
+            tail.Append(",\"reason\":\"");
+            Escape(tail, reason);
+            tail.Append("\",\"state\":").Append(state);
+            Event("probe", null, summary, tail.ToString());
         }
 
         void OnSceneLoaded(Scene scene, LoadSceneMode mode)
@@ -130,6 +165,7 @@ namespace PortDebug
                                     desc, Time.realtimeSinceStartup));
             Event("scene", null, desc);
             Shot("scene", scene.name);
+            Probe("scene " + scene.name);
         }
 
         void Shot(string reason, string sceneName = null)
@@ -171,7 +207,8 @@ namespace PortDebug
             }
         }
 
-        void Event(string kind, string type, string msg)
+        // rawTail, when given, is appended verbatim before the closing brace (",\"key\":<json>...").
+        void Event(string kind, string type, string msg, string rawTail = null)
         {
             // Time.* is main-thread only; the log callback can run on any thread
             double t = m_T0 + m_Clock.Elapsed.TotalSeconds;
@@ -181,7 +218,9 @@ namespace PortDebug
             if (type != null) sb.Append(",\"type\":\"").Append(type).Append('"');
             sb.Append(",\"msg\":\"");
             Escape(sb, msg ?? "");
-            sb.Append("\"}");
+            sb.Append('"');
+            if (rawTail != null) sb.Append(rawTail);
+            sb.Append('}');
             lock (m_Lock)
             {
                 if (m_Events == null) return;
@@ -190,7 +229,7 @@ namespace PortDebug
             }
         }
 
-        static void Escape(StringBuilder sb, string s)
+        internal static void Escape(StringBuilder sb, string s)
         {
             foreach (char c in s)
             {
