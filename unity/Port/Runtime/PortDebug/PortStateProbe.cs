@@ -75,6 +75,8 @@ namespace PortDebug
             Section(w, "logo", () => w.Bool(IWYKLogo.Enabled));
             Section(w, "pause", () => WritePause(w));
             Section(w, "labels", () => WriteLabels(w));
+            Section(w, "wait", () => WriteWait(w));
+            Section(w, "fsm", () => WriteFsms(w));
             w.End();
             return w.ToString();
         }
@@ -163,6 +165,31 @@ namespace PortDebug
             object tr = Field(flow, "m_HomeTransition");
             w.Key("home").Str(pos != null ? pos.ToString() : null);
             w.Key("transition").Str(tr != null ? tr.ToString() : null);
+            w.End();
+        }
+
+        // The game's own wait description (WishWait debug label) and the clocks it depends on.
+        static void WriteWait(Json w)
+        {
+            w.Begin();
+            object label = WishWait.s != null ? Field(WishWait.s, "m_DebugLabel") : null;
+            w.Key("text").Str(label is UILabel l ? l.text : null);
+            w.Key("timeScale").Str(Time.timeScale.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            w.Key("time").Str(Time.time.ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
+            w.End();
+        }
+
+        // Active state of every enabled PlayMaker FSM ("GameObject/FsmName": "State").
+        static void WriteFsms(Json w)
+        {
+            w.Begin();
+            int n = 0;
+            foreach (var f in UnityEngine.Object.FindObjectsByType<PlayMakerFSM>(FindObjectsSortMode.None))
+            {
+                if (!f.isActiveAndEnabled || n++ >= 80)
+                    continue;
+                w.Key(f.gameObject.name + "/" + f.FsmName).Str(f.ActiveStateName);
+            }
             w.End();
         }
 

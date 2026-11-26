@@ -126,8 +126,30 @@ public static class PortBuild
 
     public static void BuildMac()
     {
-        string app = AppPath;
         ConfigureMac();
+        BuildFor(BuildTarget.StandaloneOSX, AppPath, StreamingAssetsOf(AppPath));
+    }
+
+    public static string DefaultWinExePath
+    {
+        get { return Path.GetFullPath(Path.Combine(ProjectRoot, "..", "builds", "win", "ThatsYou.exe")); }
+    }
+
+    // Windows x64 player (Mono). Native plugin: Assets/PortNative/iwyknet/win-x64/iwyknet.dll.
+    public static void BuildWin()
+    {
+        if (EditorUserBuildSettings.activeBuildTarget != BuildTarget.StandaloneWindows64 &&
+            !EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Standalone, BuildTarget.StandaloneWindows64))
+            Fail("could not switch the active build target to StandaloneWindows64 (Windows build support missing?)");
+        if (PlayerSettings.GetScriptingBackend(NamedBuildTarget.Standalone) != ScriptingImplementation.Mono2x)
+            PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone, ScriptingImplementation.Mono2x);
+        string exe = Arg("-portBuildOut") ?? DefaultWinExePath;
+        string data = Path.Combine(Path.GetDirectoryName(exe), Path.GetFileNameWithoutExtension(exe) + "_Data");
+        BuildFor(BuildTarget.StandaloneWindows64, exe, Path.Combine(data, "StreamingAssets"));
+    }
+
+    static void BuildFor(BuildTarget target, string app, string streamingAssets)
+    {
         string[] scenes = Scenes();
         Log("scenes: " + scenes.Length + " -> " + string.Join(", ", scenes.Select(Path.GetFileNameWithoutExtension)));
         Log("output: " + app);
@@ -137,7 +159,7 @@ public static class PortBuild
         {
             scenes = scenes,
             locationPathName = app,
-            target = BuildTarget.StandaloneOSX,
+            target = target,
             targetGroup = BuildTargetGroup.Standalone,
             options = BuildOptions.Development,
         };
@@ -174,10 +196,10 @@ public static class PortBuild
             Fail("player build " + s.result);
         }
 
-        BuildAssetBundles(StreamingAssetsOf(app));
-        WriteInputAxes(StreamingAssetsOf(app));
-        CheckPortAudio(StreamingAssetsOf(app));
-        CleanWwiseAudio(StreamingAssetsOf(app));
+        BuildAssetBundles(streamingAssets, target);
+        WriteInputAxes(streamingAssets);
+        CheckPortAudio(streamingAssets);
+        CleanWwiseAudio(streamingAssets);
         Log("RESULT: Succeeded " + app);
     }
 
@@ -290,6 +312,11 @@ public static class PortBuild
     // and written over the copy in the built player, keeping the file name the game asks for.
     public static void BuildAssetBundles(string streamingAssets)
     {
+        BuildAssetBundles(streamingAssets, BuildTarget.StandaloneOSX);
+    }
+
+    public static void BuildAssetBundles(string streamingAssets, BuildTarget target)
+    {
         string[] names = AssetDatabase.GetAllAssetBundleNames();
         var builds = new List<AssetBundleBuild>();
         foreach (string name in names)
@@ -317,7 +344,7 @@ public static class PortBuild
             Directory.Delete(tmp, true);
         Directory.CreateDirectory(tmp);
         AssetBundleManifest manifest = BuildPipeline.BuildAssetBundles(
-            tmp, builds.ToArray(), BuildAssetBundleOptions.ChunkBasedCompression, BuildTarget.StandaloneOSX);
+            tmp, builds.ToArray(), BuildAssetBundleOptions.ChunkBasedCompression, target);
         if (manifest == null)
             Fail("BuildPipeline.BuildAssetBundles returned no manifest");
 

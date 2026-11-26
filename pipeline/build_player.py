@@ -25,9 +25,13 @@ EXCEPTION = re.compile(r"^[A-Za-z_][\w.]*Exception: .*$")
 RESULT = re.compile(r"Build Finished, Result: (\w+)")
 
 
-def build_argv(editor: Path, project: Path, log: Path) -> list[str]:
+TARGETS = {"mac": ("PortBuild.BuildMac", "OSXUniversal"), "win": ("PortBuild.BuildWin", "Win64")}
+
+
+def build_argv(editor: Path, project: Path, log: Path, target: str = "mac") -> list[str]:
+    method, build_target = TARGETS[target]
     return [str(editor), "-batchmode", "-quit", "-projectPath", str(project),
-            "-executeMethod", "PortBuild.BuildMac", "-buildTarget", "OSXUniversal", "-logFile", str(log)]
+            "-executeMethod", method, "-buildTarget", build_target, "-logFile", str(log)]
 
 
 def lock_holders(project: Path, run=subprocess.run) -> list[int]:
@@ -143,12 +147,13 @@ def main(argv: list[str] | None = None) -> int:
 
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--project", type=Path, help="Unity project (default work/project)")
-    ap.add_argument("--log", type=Path, help="log file (default work/reports/build-mac.log)")
+    ap.add_argument("--log", type=Path, help="log file (default work/reports/build-<target>.log)")
+    ap.add_argument("--target", choices=sorted(TARGETS), default="mac")
     a = ap.parse_args(argv)
     c = config.load()
     build_all.check_unity_editor(c.unity_editor)
     project = (a.project or c.work_dir / "project").resolve()
-    log = (a.log or c.work_dir / "reports" / "build-mac.log").resolve()
+    log = (a.log or c.work_dir / "reports" / f"build-{a.target}.log").resolve()
     holders = lock_holders(project)
     if holders:
         print(f"refusing to build: {project} is open in Unity (pid {', '.join(map(str, holders))})", file=sys.stderr)
@@ -159,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
     log.parent.mkdir(parents=True, exist_ok=True)
     if log.exists():
         log.unlink()
-    argv_ = build_argv(c.unity_editor, project, log)
+    argv_ = build_argv(c.unity_editor, project, log, a.target)
     print("running:", " ".join(argv_), flush=True)
     rc = subprocess.run(argv_).returncode
     s = summarize_log(log.read_text(errors="replace") if log.is_file() else "")
@@ -168,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
     if rc == 0 and s["result"] not in (None, "Success", "Succeeded"):
         rc = 1
     if rc == 0:
-        write_net_config(c, c.work_dir / "builds" / "mac")
+        write_net_config(c, c.work_dir / "builds" / a.target)
     return rc
 
 

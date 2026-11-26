@@ -151,3 +151,15 @@ class NetConfigStepTest(unittest.TestCase):
         finally:
             import shutil
             shutil.rmtree(out, ignore_errors=True)
+
+
+class TargetArgvTest(unittest.TestCase):
+    def test_windows_target(self):
+        from pipeline.build_player import build_argv
+        argv = build_argv(Path("/u"), Path("/p"), Path("/l"), "win")
+        self.assertIn("PortBuild.BuildWin", argv)
+        self.assertEqual(argv[argv.index("-buildTarget") + 1], "Win64")
+
+    def test_mac_is_default(self):
+        from pipeline.build_player import build_argv
+        self.assertIn("PortBuild.BuildMac", build_argv(Path("/u"), Path("/p"), Path("/l")))
