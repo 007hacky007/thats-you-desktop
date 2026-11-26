@@ -70,8 +70,15 @@ class ArgvTests(unittest.TestCase):
     def test_player_argv(self):
         argv = run_player.player_argv(Path("/a/exe"), Path("/r/x"), keys="3:cross,5:Return")
         self.assertEqual(argv, ["/a/exe", "-logFile", "/r/x/player.log", "-portObserve", "/r/x/shots",
-                                "-portKeys", "3:cross,5:Return", "-screen-width", "1280",
+                                "-portKeys", "3:cross,5:Return", "-portMute", "-screen-width", "1280",
                                 "-screen-height", "720", "-screen-fullscreen", "0"])
+
+    def test_player_argv_mutes_by_default(self):
+        self.assertIn("-portMute", run_player.player_argv(Path("/a/exe"), Path("/r/x")))
+
+    def test_player_argv_sound_or_recording_not_muted(self):
+        self.assertNotIn("-portMute", run_player.player_argv(Path("/a/exe"), Path("/r/x"), mute=False))
+        self.assertNotIn("-portMute", run_player.player_argv(Path("/a/exe"), Path("/r/x"), audio_record=True))
 
     def test_player_argv_without_keys(self):
         argv = run_player.player_argv(Path("/a/exe"), Path("/r/x"))

@@ -114,10 +114,12 @@ def player_argv(exe: Path, run_dir: Path, keys: str | None = None, width: int = 
                 fx_keep: str | None = None, shot_interval: float | None = None,
                 key_shots: bool = False, extra: list[str] | None = None, audio_trace: bool = False,
                 audio_record: bool = False, audio_root: Path | None = None, voice_language: str | None = None,
-                audio_off: bool = False) -> list[str]:
+                audio_off: bool = False, mute: bool = True) -> list[str]:
     argv = [str(exe), "-logFile", str(run_dir / "player.log"), "-portObserve", str(run_dir / "shots")]
     if keys:
         argv += ["-portKeys", keys]
+    if mute and not audio_record:
+        argv.append("-portMute")  # automated runs stay silent; recording needs the real mix
     if shot_interval is not None:
         argv += ["-portShotInterval", f"{shot_interval:g}"]
     if key_shots:
@@ -836,6 +838,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="read converted audio from DIR instead of StreamingAssets/PortAudio (-portAudioRoot)")
     ap.add_argument("--voice-language", metavar="NAME",
                     help="voice language, e.g. 'English(US)' or english_us (-portVoiceLanguage)")
+    ap.add_argument("--size", default="1280x720", help="window size WxH (default 1280x720)")
+    ap.add_argument("--sound", action="store_true", help="play sound (runs are muted with -portMute by default)")
     ap.add_argument("--audio-off", action="store_true", help="switch PortAudio off (-portAudioOff)")
     return ap
 
@@ -865,7 +869,8 @@ def main(argv: list[str] | None = None) -> int:
     warnings: list[str] = []
     audio = {"audio_trace": a.audio_trace, "audio_record": a.audio_record,
              "audio_root": a.audio_root.resolve() if a.audio_root else None,
-             "voice_language": a.voice_language, "audio_off": a.audio_off}
+             "voice_language": a.voice_language, "audio_off": a.audio_off, "mute": not a.sound,
+             "width": int(a.size.lower().split("x")[0]), "height": int(a.size.lower().split("x")[1])}
     rc = run(exe, run_dir, a.seconds, keys, fresh_save=a.fresh_save, no_image_effects=a.no_image_effects,
              fx_only=fx_only, fx_keep=fx_keep, shot_interval=shot_interval, key_shots=a.key_shots,
              caffeinate=not a.no_caffeinate, warnings=warnings, extra=extra, audio=audio)
