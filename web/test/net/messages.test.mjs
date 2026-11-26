@@ -41,7 +41,7 @@ test('phone -> game builders produce exact JSON (fields and order of 5.5)', () =
 
 test('profile upper-cases with the locale', () => {
   const p = build.clientPlayerProfile({ name: 'istanbul', locale: 'tr-TR', isGuest: true, cardId: 'CARD_1' });
-  assert.equal(p.uppercasePlayerName, 'İSTANBUL');
+  assert.equal(p.uppercasePlayerName, '\u0130STANBUL');
   assert.equal(p.isGuest, 1);
   const q = build.clientPlayerProfile({ name: 'x', locale: 'not a locale!', isGuest: 0, cardId: 'CARD_1' });
   assert.equal(q.uppercasePlayerName, 'X');

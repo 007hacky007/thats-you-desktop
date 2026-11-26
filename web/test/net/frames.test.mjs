@@ -38,7 +38,7 @@ test('parseTextFrame', () => {
 });
 
 test('utf8Length counts bytes', () => {
-  assert.equal(utf8Length('aé€'), 6);
+  assert.equal(utf8Length('a\u00e9\u20ac'), 6);
 });
 
 function bytes(n, seed = 1) {

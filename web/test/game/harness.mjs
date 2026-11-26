@@ -23,7 +23,7 @@ export function jpeg(n = 100, seed = 7) {
 
 export const cmd = (action, extra = {}) => ({ TypeString: 'ClientQuizCommandMessage', action, time: 0, ...extra });
 
-export function createHarness({ backend = createMemoryBackend(), clock = createFakeClock(START), draftTimeoutMs } = {}) {
+export function createHarness({ backend = createMemoryBackend(), clock = createFakeClock(START), draftTimeoutMs, seed = 0 } = {}) {
   const factory = createFakeTransportFactory();
   const log = createLog({ now: () => clock.now() });
   let n = 0;
@@ -36,7 +36,7 @@ export function createHarness({ backend = createMemoryBackend(), clock = createF
     locale: 'en-US',
     transportFactory: factory,
     device: { ua: IPHONE_UA, screenWidth: 390, screenHeight: 844, maxTouchPoints: 5 },
-    uuid: () => '00000000-0000-4000-8000-' + String(++n).padStart(12, '0'),
+    uuid: () => String(seed).padStart(8, '0') + '-0000-4000-8000-' + String(++n).padStart(12, '0'),
     random: () => 0,
     makeUrl: () => 'blob:t/' + (++urls),
     revokeUrl: (u) => revoked.push(u),
