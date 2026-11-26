@@ -4,5 +4,8 @@
   "apk": "/path/to/com.playstation.iwyk.apk",
   "work_dir": "",
   "unity_editor": "",
-  "phone_page_url": ""
+  "phone_page_url": "",
+  "net_udp_port": 47000,
+  "net_lan_ip": "",
+  "web_deploy": { "target": "folder", "path": "" }
 }
