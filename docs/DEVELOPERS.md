@@ -51,11 +51,15 @@ python3 -m pipeline.build_web                    # phone page: work/web-dist
 python3 -m pipeline.deploy_web                   # upload the phone page
 ```
 
-`build_all` merges the base game and patch, extracts the game and the app, converts the audio, creates the Unity project, applies the port's edits to the game code and imports everything into Unity. Run it again after changing your dumps or updating this repository; it only redoes what changed. Reports land in `work/reports/` (`compile.md` lists any compile errors).
+`build_all` merges the base game and patch, extracts the game and the app, converts the audio, creates the Unity project, applies the port's game edits (see Game edits) and imports everything into Unity. Run it again after changing your dumps or updating this repository; it only redoes what changed. Reports land in `work/reports/` (`compile.md` lists any compile errors).
 
 `build_player` copies the port's own code (`unity/Port`) and the network library into the project, builds the player and writes `iwyk-net.json` (your page address and network settings) next to it.
 
 Copy the whole build folder when moving the game to another computer: `ThatsYou.app`, or on Windows `ThatsYou.exe` together with `ThatsYou_Data`, `iwyknet.dll` and `iwyk-net.json`.
+
+## Game edits
+
+The port changes some of the game's scripts: Unity APIs that no longer exist, PS4-only calls, the network transport, a few bugs. These changes are applied at build time to the scripts decompiled from your own copy, by the recipes in `pipeline/game_edits/recipes/` (one per change, each with a note on what and why). Recipes contain no game code: they name files, types and members, find lines by position and check them by a hash, and insert the port's own code. If your export differs from the one the recipes were made for (another game version or AssetRipper version), the build stops with an error naming the recipe instead of editing the wrong lines.
 
 ## Playing
 
