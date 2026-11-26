@@ -394,7 +394,10 @@ namespace PortAudio
                 // keep at most one unrealized instance ahead of the realized ones
                 if (segs.Count >= 2 && !segs[segs.Count - 2].Realized)
                     return;
-                if (last.ExitAbs > Now + player.HorizonSec + 60.0 && segs.Count >= 2)
+                // decide about a minute ahead of the moment `last` has to be realized (its earliest
+                // clip start, post-exit included), never of its exit: a segment longer than the
+                // lookahead would otherwise wait for its own successor and start late
+                if (segs.Count >= 2 && !last.Realized && RealizeAt(last, double.PositiveInfinity) > Now + player.HorizonSec + 60.0)
                     return;
                 last.NextDecided = true;
                 var r = root != null ? root.Next(this) : null;
@@ -443,14 +446,17 @@ namespace PortAudio
                     continue;
                 if (!s.NextDecided)
                     return;   // the successor decides whether the post-exit plays
-                double cutBefore = Math.Max(s.CutBefore, Now);
-                double earliest = PaMusicTimeline.EarliestStart(s.Info, s.T0, cutBefore, CutAfterOf(s));
-                if (double.IsInfinity(earliest))
-                    earliest = s.EntryAbs;
-                if (earliest > Now + player.HorizonSec)
+                if (RealizeAt(s, CutAfterOf(s)) > Now + player.HorizonSec)
                     return;
                 Realize(s);
             }
+        }
+
+        // Earliest clip start of `s` from now on (its entry when no clip sounds).
+        double RealizeAt(SegInst s, double cutAfter)
+        {
+            double earliest = PaMusicTimeline.EarliestStart(s.Info, s.T0, Math.Max(s.CutBefore, Now), cutAfter);
+            return double.IsInfinity(earliest) ? s.EntryAbs : earliest;
         }
 
         void Realize(SegInst s)
@@ -458,6 +464,9 @@ namespace PortAudio
             s.Realized = true;
             double cutBefore = Math.Max(s.CutBefore, Now);
             double cutAfter = CutAfterOf(s);
+            if (!s.Stinger && Now > s.EntryAbs + player.HorizonSec)
+                Trace("op", "late", "playingId", PlayingId, "node", RootNode, "segment", s.Info.Id, "sync", "realize", "at", s.EntryAbs,
+                    "now", Now);
             Trace("op", s.Stinger ? "stinger" : "segment", "playingId", PlayingId, "node", RootNode, "segment", s.Info.Id,
                 "sync", s.Stinger ? "stinger" : "entry", "at", s.EntryAbs);
             for (int ti = 0; ti < s.Info.Tracks.Length; ti++)

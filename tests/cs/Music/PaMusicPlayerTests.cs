@@ -440,6 +440,56 @@ namespace PortAudio.Tests
             }
         }
 
+        // An 8 s intro, then a 155 s segment that loops forever (longer than HorizonSec + 60 s).
+        static MusicFixture IntroThenLongLoop()
+        {
+            var f = new MusicFixture();
+            var rs = RanSeq(5000, 0, Group("sequenceContinuous", 1, Leaf(5001), Leaf(5002, 0)), 5001, 5002);
+            rs.Music.Transitions = new[] { Rule(-1, -1, "exitMarker", "entryMarker", postExit: false, preEntry: true) };
+            f.Add(rs,
+                Segment(5001, 5000, 8000, 0, 8000, 5101), Track(5101, 5001, Clip(51, 0, 0, 0, 8000)),
+                Segment(5002, 5000, 155000, 0, 155000, 5102), Track(5102, 5002, Clip(52, 0, 0, 0, 155000)))
+             .Media(51, 8).Media(52, 155);
+            return f;
+        }
+
+        [PaTest]
+        public void LongSegmentAfterShortOneStartsOnTime()
+        {
+            using (var f = IntroThenLongLoop())
+            {
+                f.Play(5000);
+                f.Run(0.05);
+                double a = f.Voices.ForMedia(51).Single().Spec.StartAt;
+                f.Run(9.0, 0.05);
+                var b = f.Voices.ForMedia(52);
+                Check.Equal(1, b.Count, "long segment realized before its entry");
+                Check.Near(a + 8.0, b[0].Spec.StartAt, 1e-6, "long segment starts at its entry");
+                Check.Near(0.0, b[0].Spec.SourceOffset, 1e-6, "from the clip start");
+                f.Run(160.0, 0.05);
+                var loops = f.Voices.ForMedia(52);
+                Check.True(loops.Count >= 2, "second loop iteration realized");
+                Check.Near(a + 8.0 + 155.0, loops[1].Spec.StartAt, 1e-6, "second loop iteration starts on time");
+                Check.Near(0.0, loops[1].Spec.SourceOffset, 1e-6, "second loop from the clip start");
+                Check.Equal(0, f.Sink.Count("music", "late"), "nothing late");
+            }
+        }
+
+        [PaTest]
+        public void LateRealizeIsTraced()
+        {
+            using (var f = IntroThenLongLoop())
+            {
+                f.Play(5000);
+                f.Run(5.0, 5.0);   // first tick at 105: the intro is placed
+                f.Run(10.0, 5.0);  // ticks at 110 and 115: the long segment (entry 108.x) is realized late
+                var b = f.Voices.ForMedia(52);
+                Check.Equal(1, b.Count, "long segment realized");
+                Check.True(b[0].Spec.SourceOffset > 0.5, "joined mid-clip");
+                Check.True(f.Sink.Count("music", "late") >= 1, "late realize traced");
+            }
+        }
+
         [PaTest]
         public void PlayRejectsNonMusicNodes()
         {
