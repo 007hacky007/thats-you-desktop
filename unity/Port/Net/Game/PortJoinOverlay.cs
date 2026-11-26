@@ -32,8 +32,33 @@ namespace PortNet
             Debug.Log("[PortNet] join overlay destroyed");
         }
 
+        // Automated playthroughs: -portJoinUrlFile <path> receives the join URL once it exists.
+        static string s_joinUrlFile = ArgValue("-portJoinUrlFile");
+        static string s_written;
+
+        static string ArgValue(string name)
+        {
+            string[] a = System.Environment.GetCommandLineArgs();
+            int i = System.Array.IndexOf(a, name);
+            return i >= 0 && i + 1 < a.Length ? a[i + 1] : null;
+        }
+
         void Update()
         {
+            if (s_joinUrlFile != null)
+            {
+                string url = PortNetJoin.JoinUrl;
+                if (url != null && url != s_written)
+                {
+                    try
+                    {
+                        System.IO.File.WriteAllText(s_joinUrlFile + ".tmp", url);
+                        System.IO.File.Copy(s_joinUrlFile + ".tmp", s_joinUrlFile, true);
+                        s_written = url;
+                    }
+                    catch (System.Exception e) { Debug.LogWarning("[PortNet] join url file: " + e.Message); }
+                }
+            }
             if (Input.GetKeyDown(KeyCode.J))
                 ForceShow = !ForceShow;
             bool fe = FrontEndFlow.s_InFrontend;
