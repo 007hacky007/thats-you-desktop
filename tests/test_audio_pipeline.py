@@ -207,8 +207,10 @@ class AudioBuildTests(unittest.TestCase):
         self.assertEqual(ev[2]["missing"], [{"id": 200, "scope": "english_uk", "reason": "not converted"}])
         self.assertTrue(ev[3]["reachesNothing"])
         self.assertEqual(ev[3]["missingTargets"], [999])
-        self.assertEqual(cov["summary"], {"events": 3, "ok": 0, "withMissingMedia": 2, "reachesNothing": 1,
-                                          "missingMedia": 2, "named": 2})
+        self.assertEqual(ev[3]["status"], "problem")
+        self.assertEqual(cov["summary"], {"events": 3, "ok": 0, "control": 0, "deadInOriginal": 0, "problems": 3,
+                                          "withMissingMedia": 2, "reachesNothing": 1, "missingMedia": 2,
+                                          "audioInput": 0, "named": 2})
         md = (self.work / "audio/reports/coverage.md").read_text()
         self.assertIn("PLAY_MUSIC_FRONTEND", md)
         self.assertIn("| Frontend |", md)
@@ -227,6 +229,79 @@ class CoverageTests(unittest.TestCase):
             cov = audio.coverage(rep, out)
             self.assertTrue(cov["events"][0]["ok"])
             self.assertEqual(cov["summary"]["ok"], 1)
+
+
+def _ev(i, media=(), *, nothing=None, missing=(), dead=(), control=False, name=""):
+    media = [{"id": m, "scope": sc} for sc, m in media]
+    return {"id": i, "name": name, "bank": "B", "language": "", "media": media,
+            "reachesNothing": (not media) if nothing is None else nothing,
+            "missingTargets": list(missing), "deadTargets": list(dead), "controlOnly": control}
+
+
+class CoverageClassificationTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.out = Path(self.tmp.name)
+        write_json(self.out / "media.json", {"scope": "li", "media": [{"id": 100, "file": "media/100.ogg"}]})
+        (self.out / "media").mkdir()
+        (self.out / "media/100.ogg").write_bytes(b"OggS")
+        rep = {"events": [
+            _ev(1, [("li", 100)], name="PLAY_OK"),
+            _ev(2, [("audioInput", 210846186)], name="PLAY_RUNTIMEEXTERNAL_VOICE"),
+            _ev(3, control=True, name="STOP_ALL"),
+            _ev(4, missing=[600], dead=[600], name="PLAY_TWOPLAYER_X"),
+            _ev(5, missing=[500], name="PLAY_LOST"),                      # target exists elsewhere: real
+            _ev(6, missing=[500, 600], dead=[600], name="PLAY_HALF_DEAD"),  # one target live: real
+            _ev(7, name="PLAY_EMPTY"),                                    # plays nothing, no missing target
+            _ev(8, [("li", 101)], name="PLAY_UNCONVERTED"),
+            _ev(9, [("li", 100), ("audioInput", 1), ("external", 2)], name="PLAY_MIX"),
+        ]}
+        self.cov = audio.coverage(rep, self.out)
+        self.ev = {e["id"]: e for e in self.cov["events"]}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_statuses(self):
+        st = {i: e["status"] for i, e in self.ev.items()}
+        self.assertEqual(st, {1: "ok", 2: "ok", 3: "control", 4: "deadInOriginal", 5: "problem", 6: "problem",
+                              7: "problem", 8: "problem", 9: "ok"})
+        self.assertEqual({i for i, e in self.ev.items() if e["ok"]}, {1, 2, 3, 9})
+
+    def test_audio_input_is_not_converted_media(self):
+        self.assertEqual((self.ev[2]["media"], self.ev[2]["audioInput"], self.ev[2]["missing"]), (0, 1, []))
+        self.assertEqual((self.ev[9]["media"], self.ev[9]["audioInput"], self.ev[9]["external"]), (1, 1, 1))
+
+    def test_dead_targets_carried(self):
+        self.assertEqual(self.ev[4]["deadTargets"], [600])
+        self.assertEqual(self.ev[6]["deadTargets"], [600])
+
+    def test_summary(self):
+        self.assertEqual(self.cov["summary"], {"events": 9, "ok": 3, "control": 1, "deadInOriginal": 1,
+                                               "problems": 4, "withMissingMedia": 1, "reachesNothing": 5,
+                                               "missingMedia": 1, "audioInput": 2, "named": 9})
+
+    def test_markdown_sections(self):
+        md = audio.coverage_markdown(self.cov)
+        self.assertTrue(md.isascii())
+        for line in ("- resolve to converted audio: 3", "- control only (stop, pause, resume, parameters): 1",
+                     "- original data: dead target: 1", "- real problems: 4"):
+            self.assertIn(line, md)
+        sections = [l for l in md.splitlines() if l.startswith("## ")]
+        self.assertEqual(sections, ["## Real problems (4)", "## Original data: dead target (1)",
+                                    "## Control-only events (1)", "## Events that resolve (3)"])
+        problems = md.split("## Original data")[0]
+        self.assertIn("PLAY_LOST", problems)
+        self.assertNotIn("PLAY_TWOPLAYER_X", problems)
+        self.assertNotIn("STOP_ALL", problems)
+        self.assertNotIn("PLAY_RUNTIMEEXTERNAL_VOICE", problems)
+        self.assertIn("600 (dead)", md)
+
+    def test_report_without_new_fields(self):
+        old = {"events": [{"id": 1, "name": "", "bank": "B", "language": "", "media": [], "reachesNothing": True,
+                           "missingTargets": [9]}]}
+        cov = audio.coverage(old, self.out)
+        self.assertEqual(cov["events"][0]["status"], "problem")
 
 
 class CliTests(unittest.TestCase):

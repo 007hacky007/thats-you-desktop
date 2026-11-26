@@ -90,6 +90,23 @@ def _load_media_tables(out_root: Path) -> dict[str, dict[int, dict]]:
     return tables
 
 
+STATUSES = ("ok", "control", "deadInOriginal", "problem")
+
+
+def _status(missing: list, reaches_nothing: bool, control: bool, targets: list, dead: list) -> str:
+    """ok: resolves to converted audio; control: stops/pauses/resumes/sets parameters only;
+    deadInOriginal: plays only targets that no bank of the original data defines; problem: the rest."""
+    if missing:
+        return "problem"
+    if control:
+        return "control"
+    if not reaches_nothing:
+        return "ok"
+    if targets and set(targets) <= set(dead):
+        return "deadInOriginal"
+    return "problem"
+
+
 def coverage(report: dict, out_root: Path) -> dict:
     """Join graph-report events with the media tables: does every event resolve to converted audio?"""
     out_root = Path(out_root)
@@ -97,12 +114,15 @@ def coverage(report: dict, out_root: Path) -> dict:
     exists: dict[str, bool] = {}
     events, missing_all = [], set()
     for ev in report.get("events", []):
-        media = ext = 0
+        media = ext = audio_input = 0
         missing = []
         for m in ev.get("media", []):
             scope, mid = m.get("scope"), m.get("id")
             if scope == "external":  # resolved at runtime by name from the language's external table
                 ext += 1
+                continue
+            if scope == "audioInput":  # plugin source fed by the game at runtime, no media file
+                audio_input += 1
                 continue
             media += 1
             entry = tables.get(scope, {}).get(int(mid))
@@ -117,15 +137,21 @@ def coverage(report: dict, out_root: Path) -> dict:
                 missing.append({"id": mid, "scope": scope, "reason": reason})
                 missing_all.add((scope, mid))
         reaches_nothing = bool(ev.get("reachesNothing"))
+        targets = list(ev.get("missingTargets") or [])
+        dead = list(ev.get("deadTargets") or [])
+        status = _status(missing, reaches_nothing, bool(ev.get("controlOnly")), targets, dead)
         events.append({"id": ev.get("id"), "name": ev.get("name") or "", "bank": ev.get("bank") or "",
                        "language": ev.get("language") or "", "media": media, "external": ext,
-                       "missing": missing, "reachesNothing": reaches_nothing,
-                       "missingTargets": list(ev.get("missingTargets") or []),
-                       "ok": not missing and not reaches_nothing})
-    summary = {"events": len(events), "ok": sum(e["ok"] for e in events),
+                       "audioInput": audio_input, "missing": missing, "reachesNothing": reaches_nothing,
+                       "missingTargets": targets, "deadTargets": dead, "status": status,
+                       "ok": status in ("ok", "control")})
+    count = lambda st: sum(e["status"] == st for e in events)
+    summary = {"events": len(events), "ok": count("ok"), "control": count("control"),
+               "deadInOriginal": count("deadInOriginal"), "problems": count("problem"),
                "withMissingMedia": sum(bool(e["missing"]) for e in events),
                "reachesNothing": sum(e["reachesNothing"] for e in events),
-               "missingMedia": len(missing_all), "named": sum(bool(e["name"]) for e in events)}
+               "missingMedia": len(missing_all), "audioInput": sum(e["audioInput"] for e in events),
+               "named": sum(bool(e["name"]) for e in events)}
     return {"summary": summary, "events": events}
 
 
@@ -134,30 +160,43 @@ def _md_cell(v) -> str:
     return s.encode("ascii", "replace").decode("ascii")
 
 
+def _md_list(items: list, limit: int = 8) -> str:
+    out = ", ".join(items[:limit])
+    if len(items) > limit:
+        out += f", +{len(items) - limit} more"
+    return out or "-"
+
+
 def coverage_markdown(cov: dict) -> str:
     s = cov["summary"]
     lines = ["# Audio coverage", "",
              "Every Wwise event from the banks, joined with the converted media tables.", "",
              f"- events: {s['events']} ({s['named']} with an AK.cs name)",
              f"- resolve to converted audio: {s['ok']}",
+             f"- control only (stop, pause, resume, parameters): {s['control']}",
+             f"- original data: dead target: {s['deadInOriginal']}",
+             f"- real problems: {s['problems']}",
              f"- with missing media: {s['withMissingMedia']} ({s['missingMedia']} distinct media ids)",
-             f"- reach no media at all: {s['reachesNothing']}", ""]
-    header = ["| event | id | bank | language | media | external | missing | reaches nothing |",
-              "|---|---|---|---|---|---|---|---|"]
+             f"- reach no media at all: {s['reachesNothing']}",
+             f"- audio input sources (fed at runtime): {s['audioInput']}", ""]
+    header = ["| event | id | bank | language | media | external | audio input | missing | missing targets "
+              "| reaches nothing |",
+              "|---|---|---|---|---|---|---|---|---|---|"]
 
     def row(e):
-        miss = ", ".join(f"{m['scope']}/{m['id']} ({m['reason']})" for m in e["missing"][:8])
-        if len(e["missing"]) > 8:
-            miss += f", +{len(e['missing']) - 8} more"
+        miss = _md_list([f"{m['scope']}/{m['id']} ({m['reason']})" for m in e["missing"]])
+        dead = set(e.get("deadTargets") or [])
+        targets = _md_list([f"{t} (dead)" if t in dead else str(t) for t in e["missingTargets"]])
         return "| " + " | ".join(_md_cell(x) for x in (e["name"] or "-", e["id"], e["bank"], e["language"] or "-",
-                                                         e["media"], e["external"], miss or "-",
-                                                         "yes" if e["reachesNothing"] else "no")) + " |"
+                                                         e["media"], e["external"], e.get("audioInput", 0), miss,
+                                                         targets, "yes" if e["reachesNothing"] else "no")) + " |"
 
     key = lambda e: (e["bank"], e["language"], e["name"] or "~", e["id"] or 0)
-    bad = sorted((e for e in cov["events"] if not e["ok"]), key=key)
-    lines += [f"## Events with problems ({len(bad)})", ""] + header + [row(e) for e in bad] + [""]
-    good = sorted((e for e in cov["events"] if e["ok"]), key=key)
-    lines += [f"## Events that resolve ({len(good)})", ""] + header + [row(e) for e in good] + [""]
+    titles = {"problem": "Real problems", "deadInOriginal": "Original data: dead target",
+              "control": "Control-only events", "ok": "Events that resolve"}
+    for st in ("problem", "deadInOriginal", "control", "ok"):
+        rows = sorted((e for e in cov["events"] if e.get("status") == st), key=key)
+        lines += [f"## {titles[st]} ({len(rows)})", ""] + header + [row(e) for e in rows] + [""]
     return "\n".join(lines)
 
 
@@ -233,8 +272,9 @@ def build(work_dir: Path, project: Path | None, *, verify: str = "sample", jobs:
 
     result["coverage"] = write_coverage(report, out_root, report_dir)
     c = result["coverage"]
-    log(f"audio: coverage {c['ok']}/{c['events']} events resolve, {c['withMissingMedia']} with missing media, "
-        f"{c['reachesNothing']} reach nothing; {report_dir / 'coverage.md'}")
+    log(f"audio: coverage {c['events']} events: {c['ok']} ok, {c['control']} control, "
+        f"{c['deadInOriginal']} dead in original, {c['problems']} real problems "
+        f"({c['withMissingMedia']} with missing media); {report_dir / 'coverage.md'}")
 
     if install and project is not None and not graph_only:
         result["install"] = steps.install(out_root, project)

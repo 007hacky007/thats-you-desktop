@@ -310,6 +310,13 @@ class BuildTest(unittest.TestCase):
         self.assertTrue(ev[(EV_STOP, "")]["reachesNothing"])
         self.assertTrue(ev[(EV_PARAM, "")]["reachesNothing"])
         self.assertEqual(ev[(EV_MISSING, "")]["missingTargets"], [9999])
+        self.assertEqual(ev[(EV_MISSING, "")]["deadTargets"], [9999])
+        self.assertFalse(ev[(EV_MISSING, "")]["controlOnly"])
+        self.assertTrue(ev[(EV_STOP, "")]["controlOnly"])
+        self.assertTrue(ev[(EV_PARAM, "")]["controlOnly"])
+        for eid in (EV_PLAY, EV_CHAIN, EV_MUSIC):
+            self.assertFalse(ev[(eid, "")]["controlOnly"])
+            self.assertEqual(ev[(eid, "")]["deadTargets"], [])
         self.assertEqual(ev[(EV_MUSIC, "")]["media"], [{"id": MUS_MEDIA, "scope": "li"}])
         self.assertEqual(ev[(EV_CHAIN, "")]["media"], [{"id": MUS_MEDIA, "scope": "li"}])  # via PlayEvent
         cz = ev[(L_EV, "Czech")]
@@ -334,6 +341,55 @@ class BuildTest(unittest.TestCase):
         self.assertFalse(stale.exists())
         self.assertFalse(stale.parent.exists())
         self.assertEqual((self.out / "banks/SFX_Bank.json").read_bytes(), before)
+
+
+def _bank(folder, name, objects):
+    language = "" if folder == ag.LI_FOLDER else folder
+    return {"folder": folder, "name": name, "language": language,
+            "scope": "li" if not language else ag.lang_key(language),
+            "bank": {"header": {"id": 1}, "objects": objects, "didx": [], "unparsed": []}}
+
+
+class ReportClassificationTest(unittest.TestCase):
+    """controlOnly and deadTargets on synthetic parsed banks."""
+
+    def setUp(self):
+        ev = lambda i, acts: {"type": "Event", "id": i, "actions": acts}
+        act = lambda i, kind, target: {"type": "Action", "id": i, "action": kind, "target": target}
+        li = [
+            ev(1, [11]), act(11, "play", 500),            # 500 exists only in the Czech bank
+            ev(2, [21]), act(21, "play", 600),            # 600 exists in no bank
+            ev(3, [31, 32]), act(31, "stop", 600), act(32, "pause", 0),
+            ev(4, []),
+            ev(5, [51]),                                  # action 51 is in no bank
+            ev(6, [61]), act(61, "playEvent", 700),       # chained event in no bank
+            ev(7, [71]), act(71, "resume", 0),
+            ev(8, [81, 82]), act(81, "setGameParameter", 0), act(82, "playEvent", 7),  # chain to control only
+            ev(9, [91]), act(91, "playEvent", 1),          # chain to a Play
+            ev(10, [101]), act(101, "playEvent", 10),      # self loop, plays nothing
+        ]
+        cz = [{"type": "Sound", "id": 500, "source": {"kind": "vorbis", "id": 9, "stream": "embedded"}}]
+        banks = [_bank(ag.LI_FOLDER, "SFX", li), _bank("Czech", "Voice", cz)]
+        self.ev = {e["id"]: e for e in ag.build_report(banks, {}, "English(UK)")["events"]}
+
+    def test_control_only(self):
+        self.assertTrue(self.ev[3]["controlOnly"])
+        self.assertTrue(self.ev[4]["controlOnly"])
+        self.assertTrue(self.ev[7]["controlOnly"])
+        self.assertTrue(self.ev[8]["controlOnly"])
+        self.assertTrue(self.ev[10]["controlOnly"])
+        self.assertFalse(self.ev[9]["controlOnly"])
+        for i in (1, 2, 6):  # 6 chains to an event in no bank
+            self.assertFalse(self.ev[i]["controlOnly"])
+        self.assertFalse(self.ev[5]["controlOnly"])  # unknown action: not provably control-only
+
+    def test_dead_targets(self):
+        self.assertEqual(self.ev[1]["missingTargets"], [500])
+        self.assertEqual(self.ev[1]["deadTargets"], [])  # present in another language's bank
+        self.assertEqual(self.ev[2]["deadTargets"], [600])
+        self.assertEqual(self.ev[5]["deadTargets"], [51])
+        self.assertEqual(self.ev[6]["deadTargets"], [700])
+        self.assertEqual(self.ev[3]["deadTargets"], [])
 
 
 class UnparsedTest(unittest.TestCase):

@@ -25,7 +25,7 @@ from pathlib import Path
 
 from pipeline import wwise_bank as wb
 
-VERSION = "1"
+VERSION = "2"
 FORMAT = 1
 LI_FOLDER = "LocaleIndependent"
 DEFAULT_LANGUAGE = "English(UK)"
@@ -650,6 +650,28 @@ def reach_event(event_id: int, scope: Scope) -> tuple[list[dict], list[int]]:
     return sorted(media.values(), key=lambda m: (m["scope"], m["id"])), missing
 
 
+PLAY_ACTIONS = ("play", "playAndContinue")
+
+
+def control_only(event: dict, scope: Scope, _seen: set | None = None) -> bool:
+    """True when every action of the event is known and none plays a node, directly or through
+    PlayEvent chains (stop, pause, resume, set game parameter...). Such events reach no media by design."""
+    seen = _seen if _seen is not None else set()
+    seen.add(event["id"])
+    for aid in event.get("actions", []):
+        hit = scope.objects.get(aid)
+        if hit is None or hit[0].get("action") in PLAY_ACTIONS:
+            return False
+        if hit[0].get("action") == "playEvent":
+            tid = hit[0].get("target")
+            if tid in seen:
+                continue
+            target = scope.objects.get(tid)
+            if target is None or target[0]["type"] != "Event" or not control_only(target[0], scope, seen):
+                return False
+    return True
+
+
 def referenced_media(report: dict) -> dict[str, set[int]]:
     """scope ("li" or langKey) -> media ids (embedded + streamed) used by any event or bank node."""
     out: dict[str, set[int]] = {}
@@ -744,6 +766,7 @@ def build(source_root: Path, out_root: Path, *, report_dir: Path, names: Path | 
 
 def build_report(banks: list[dict], names: dict, default_language: str) -> dict:
     li_objects: dict = {}
+    all_ids = {o["id"] for b in banks for o in b["bank"]["objects"]}
     li_embedded: dict = {}
     lang_objects: dict[str, dict] = {}
     lang_embedded: dict[str, dict] = {}
@@ -790,7 +813,10 @@ def build_report(banks: list[dict], names: dict, default_language: str) -> dict:
             event_ids.add(o["id"])
             media, missing = reach_event(o["id"], scope)
             ev = {"id": o["id"], "name": names.get(o["id"]), "bank": b["name"], "language": b["language"],
-                  "media": media, "reachesNothing": not media, "missingTargets": missing}
+                  "media": media, "reachesNothing": not media, "missingTargets": missing,
+                  # missing targets that no bank of any language defines: dead references in the original data
+                  "deadTargets": [t for t in missing if t not in all_ids],
+                  "controlOnly": control_only(o, scope)}
             events.append(ev)
     return {"version": VERSION, "banks": report_banks, "events": events,
             "names": {"events": len(event_ids), "resolved": sum(1 for i in event_ids if i in names)}}
