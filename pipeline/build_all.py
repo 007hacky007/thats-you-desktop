@@ -1,4 +1,5 @@
-"""Run the whole pipeline: merge -> extract game -> extract app -> project -> patches -> Unity import -> report."""
+"""Run the whole pipeline: merge -> extract game -> extract app -> project -> patches -> Unity import
+-> texture import fix -> Unity reimport -> report."""
 from __future__ import annotations
 
 import hashlib
@@ -7,7 +8,7 @@ import os
 import shutil
 from pathlib import Path
 
-from pipeline import compile_report, config, extract_app, extract_game, merge, patches, unity
+from pipeline import compile_report, config, extract_app, extract_game, fix_textures, merge, patches, unity
 from pipeline.csc_check import PORT_DIR
 from pipeline.merge import _place_file
 
@@ -96,6 +97,26 @@ def check_unity_editor(editor: Path | None) -> None:
         raise config.ConfigError("unity_editor", f"not an executable file: {editor}")
 
 
+def import_project(editor: Path, project: Path, media: Path, reports: Path,
+                   run_batch=unity.run_batch, fix=fix_textures.run) -> int:
+    """Import the project in Unity, then restore the texture import settings the export loses.
+
+    fix_textures only works on metas Unity 6 has already upgraded, so it runs after the first
+    import; when it rewrites any meta, Unity imports again so the fixed settings take effect.
+    Returns the exit code of the last Unity run. Logs: unity-import.log, unity-reimport.log."""
+    reports.mkdir(parents=True, exist_ok=True)
+    # -accept-apiupdate: let Unity's script updater rewrite obsolete APIs during the 5.3 -> 6 upgrade
+    rc = run_batch(editor, project, ["-accept-apiupdate"], reports / "unity-import.log")
+    if rc != 0:
+        return rc
+    report = fix(media, project)
+    (reports / "fix-textures.json").write_text(json.dumps(report, indent=1))
+    print(f"fix_textures: {report['changed']} texture metas changed")
+    if report["changed"]:
+        rc = run_batch(editor, project, [], reports / "unity-reimport.log")
+    return rc
+
+
 def main() -> None:
     c = config.load()
     check_unity_editor(c.unity_editor)
@@ -107,14 +128,12 @@ def main() -> None:
     project = w / "project"
     print("project rebuilt:", prepare_project(pristine, project, patches.PATCH_DIR))
     log = w / "reports" / "unity-import.log"
-    log.parent.mkdir(parents=True, exist_ok=True)
-    # -accept-apiupdate: let Unity's script updater rewrite obsolete APIs during the 5.3 -> 6 upgrade
-    rc = unity.run_batch(c.unity_editor, project, ["-accept-apiupdate"], log)
+    rc = import_project(c.unity_editor, project, w / "merged" / "Media", w / "reports")
     report = compile_report.parse(log, exit_code=rc)
     compile_report.write(report, w / "reports")
     print(f"unity exit {rc}; {report.total} compile errors; report: {w / 'reports' / 'compile.md'}")
     if report.failed:
-        raise SystemExit(f"Unity failed (exit {rc}); see {log}")
+        raise SystemExit(f"Unity failed (exit {rc}); see {log} and {w / 'reports' / 'unity-reimport.log'}")
 
 
 if __name__ == "__main__":

@@ -63,6 +63,60 @@ class PrepareProjectTests(unittest.TestCase):
         self.assertFalse((self.project / "Assets/Port/New.cs").exists())
 
 
+class ImportProjectTests(unittest.TestCase):
+    """The first Unity import upgrades the exported 5.3 texture metas; fix_textures then rewrites
+    them and Unity has to import again so the fixed settings take effect."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        r = Path(self.tmp.name)
+        self.project, self.media, self.reports = r / "project", r / "media", r / "reports"
+        self.calls = []
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def batch(self, rcs):
+        rcs = list(rcs)
+
+        def run_batch(editor, project, args, log):
+            self.calls.append(("unity", Path(log).name, list(args)))
+            return rcs.pop(0)
+        return run_batch
+
+    def fix(self, changed):
+        def run(media, project, dry_run=False):
+            self.calls.append(("fix", Path(media), Path(project)))
+            return {"changed": changed, "changed_files": ["Assets/Texture2D/a.png.meta"][:changed]}
+        return run
+
+    def test_fix_textures_runs_after_import_and_reimports(self):
+        rc = build_all.import_project(Path("/u"), self.project, self.media, self.reports,
+                                      run_batch=self.batch([0, 0]), fix=self.fix(1))
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.calls[0], ("unity", "unity-import.log", ["-accept-apiupdate"]))
+        self.assertEqual(self.calls[1], ("fix", self.media, self.project))
+        self.assertEqual(self.calls[2][:2], ("unity", "unity-reimport.log"))
+        self.assertTrue((self.reports / "fix-textures.json").is_file())
+
+    def test_no_reimport_when_no_meta_changed(self):
+        rc = build_all.import_project(Path("/u"), self.project, self.media, self.reports,
+                                      run_batch=self.batch([0]), fix=self.fix(0))
+        self.assertEqual(rc, 0)
+        self.assertEqual([c[0] for c in self.calls], ["unity", "fix"])
+
+    def test_failed_import_skips_fix(self):
+        rc = build_all.import_project(Path("/u"), self.project, self.media, self.reports,
+                                      run_batch=self.batch([3]), fix=self.fix(1))
+        self.assertEqual(rc, 3)
+        self.assertEqual([c[0] for c in self.calls], ["unity"])
+
+    def test_failed_reimport_returns_its_exit_code(self):
+        rc = build_all.import_project(Path("/u"), self.project, self.media, self.reports,
+                                      run_batch=self.batch([0, 5]), fix=self.fix(2))
+        self.assertEqual(rc, 5)
+
+
 class UnityEditorCheckTests(unittest.TestCase):
     def test_missing_editor_names_key(self):
         from pipeline.config import ConfigError
