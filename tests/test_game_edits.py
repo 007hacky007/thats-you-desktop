@@ -69,6 +69,8 @@ class OpsTest(unittest.TestCase):
         out = ge.AddMembers("Foo", "\tpublic int Added;\n").apply_text(SRC)
         self.assertIn("public int Added;", out)
         self.assertLess(out.index("Added"), out.rindex("}"))
+        out = ge.InsertAfter("Foo.Bar", "\tpublic int After;\n").apply_text(SRC)
+        self.assertIn("\t}\n\tpublic int After;\n\n\tpublic void Bar(string s)", out)
         out = ge.RemoveMember("Foo.Bar").apply_text(SRC)
         self.assertNotIn("int x", out)
         self.assertIn("string s", out)

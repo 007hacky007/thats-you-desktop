@@ -59,7 +59,11 @@ def main(argv=None) -> int:
             if w.exists() != g.exists():
                 diffs.append(f"{rel}: {'missing' if w.exists() else 'should be gone'}")
             elif w.is_file() and w.read_bytes() != g.read_bytes():
-                diffs.append(f"{rel}: differs")
+                import difflib
+                d = list(difflib.unified_diff(w.read_text(errors="replace").splitlines(),
+                                              g.read_text(errors="replace").splitlines(),
+                                              "patched", "edited", n=1, lineterm=""))
+                diffs.append(f"{rel}: differs\n       " + "\n       ".join(x[:150] for x in d[2:14]))
         print(f"{'OK  ' if not diffs else 'FAIL'} {pf.stem} ({len(touched(pf))} paths)")
         for d in diffs[:8]:
             print("     " + d)

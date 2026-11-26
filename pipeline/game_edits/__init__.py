@@ -273,6 +273,17 @@ class RemoveMember(Op):
 
 
 @dataclass
+class InsertAfter(Op):
+    """Insert code right after a member (after its last line)."""
+    member: str
+    code: str
+
+    def apply_text(self, text):
+        _s, e = member_span(text, self.member)
+        return text[:e] + self.code + text[e:]
+
+
+@dataclass
 class AddMembers(Op):
     """Insert code at the end of a type body (before its closing brace line)."""
     type: str

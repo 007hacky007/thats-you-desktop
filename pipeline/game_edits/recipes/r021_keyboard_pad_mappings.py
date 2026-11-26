@@ -1,7 +1,155 @@
-"""021-keyboard-pad-mappings."""
-from pipeline.game_edits import *  # noqa: F401,F403
+"""021-keyboard-pad-mappings.
+
+The PS4 build kept the serialized keyboard fallback of MultiControllerInput but not the code
+that reads it. Rebuild the key lookups so mapped keys count as the pad buttons and axes.
+"""
+from pipeline.game_edits import File, InMember, InsertAfter, Recipe, ReplaceMember
+
+F = "Assets/Scripts/Assembly-CSharp/MultiControllerInput.cs"
 
 STEPS = [
+    File(F, [
+        InMember("MultiControllerInput.Awake", [(r"(\t\ts = this;\n)", r"\1\t\tBuildKeyboardMaps();\n", 1)]),
+        InsertAfter("MultiControllerInput.Awake", (
+            '\n'
+            '\t// Port: the PS4 build kept the serialized keyboard fallback (m_debugControlMappings,\n'
+            '\t// m_debugAxisMappings) but not the code that reads it. Rebuild the lookups here so the\n'
+            '\t// mapped keys count as the pad buttons / axes they stand for.\n'
+            '\tprivate void BuildKeyboardMaps()\n'
+            '\t{\n'
+            '\t\tm_debugKeycodes.Clear();\n'
+            '\t\tm_debugAxisPositive.Clear();\n'
+            '\t\tm_debugAxisNegative.Clear();\n'
+            '\t\tif (m_debugControlMappings != null)\n'
+            '\t\t{\n'
+            '\t\t\tforeach (KeycodeDebugMapping entry in m_debugControlMappings)\n'
+            '\t\t\t{\n'
+            '\t\t\t\tif (entry != null && entry.requiredKey != KeyCode.None && entry.debugKey != KeyCode.None)\n'
+            '\t\t\t\t{\n'
+            '\t\t\t\t\tm_debugKeycodes[entry.requiredKey] = entry.debugKey;\n'
+            '\t\t\t\t}\n'
+            '\t\t\t}\n'
+            '\t\t}\n'
+            '\t\tif (m_debugAxisMappings != null)\n'
+            '\t\t{\n'
+            '\t\t\tforeach (AxisDebugMapping entry in m_debugAxisMappings)\n'
+            '\t\t\t{\n'
+            '\t\t\t\tif (entry == null || string.IsNullOrEmpty(entry.requiredAxis))\n'
+            '\t\t\t\t{\n'
+            '\t\t\t\t\tcontinue;\n'
+            '\t\t\t\t}\n'
+            '\t\t\t\tif (entry.debugKeyPositive != KeyCode.None)\n'
+            '\t\t\t\t{\n'
+            '\t\t\t\t\tm_debugAxisPositive[entry.requiredAxis] = entry.debugKeyPositive;\n'
+            '\t\t\t\t}\n'
+            '\t\t\t\tif (entry.debugKeyNegative != KeyCode.None)\n'
+            '\t\t\t\t{\n'
+            '\t\t\t\t\tm_debugAxisNegative[entry.requiredAxis] = entry.debugKeyNegative;\n'
+            '\t\t\t\t}\n'
+            '\t\t\t}\n'
+            '\t\t}\n'
+            '\t}\n'
+            '\n'
+            '\t// Keyboard key mapped to this pad button, or KeyCode.None. A mapping made for\n'
+            '\t// Joystick1ButtonN also answers for the any-joystick JoystickButtonN.\n'
+            '\tprivate KeyCode MappedKey(KeyCode buttonKeycode)\n'
+            '\t{\n'
+            '\t\tKeyCode mapped;\n'
+            '\t\tif (m_debugKeycodes.TryGetValue(buttonKeycode, out mapped))\n'
+            '\t\t{\n'
+            '\t\t\treturn mapped;\n'
+            '\t\t}\n'
+            '\t\tint k = (int)buttonKeycode;\n'
+            '\t\tif (k >= (int)KeyCode.JoystickButton0 && k <= (int)KeyCode.JoystickButton19\n'
+            '\t\t\t&& m_debugKeycodes.TryGetValue((KeyCode)(k - (int)KeyCode.JoystickButton0 + (int)KeyCode.Joystick1Button0), out mapped))\n'
+            '\t\t{\n'
+            '\t\t\treturn mapped;\n'
+            '\t\t}\n'
+            '\t\treturn KeyCode.None;\n'
+            '\t}\n'
+        )),
+        ReplaceMember("MultiControllerInput.GetKeyUp", (
+            '\t// The button and its mapped key act as one button: up only when the last of them is released.\n'
+            '\tpublic bool GetKeyUp(KeyCode buttonKeycode)\n'
+            '\t{\n'
+            '\t\tKeyCode mapped = MappedKey(buttonKeycode);\n'
+            '\t\tif (mapped == KeyCode.None)\n'
+            '\t\t{\n'
+            '\t\t\treturn Input.GetKeyUp(buttonKeycode);\n'
+            '\t\t}\n'
+            '\t\tif (Input.GetKey(buttonKeycode) || Input.GetKey(mapped))\n'
+            '\t\t{\n'
+            '\t\t\treturn false;\n'
+            '\t\t}\n'
+            '\t\treturn Input.GetKeyUp(buttonKeycode) || Input.GetKeyUp(mapped);\n'
+            '\t}\n'
+        )),
+        ReplaceMember("MultiControllerInput.GetKeyDown", (
+            '\t// Down only on the frame the first of them is pressed.\n'
+            '\tpublic bool GetKeyDown(KeyCode buttonKeycode)\n'
+            '\t{\n'
+            '\t\tKeyCode mapped = MappedKey(buttonKeycode);\n'
+            '\t\tif (mapped == KeyCode.None)\n'
+            '\t\t{\n'
+            '\t\t\treturn Input.GetKeyDown(buttonKeycode);\n'
+            '\t\t}\n'
+            '\t\tbool downA = Input.GetKeyDown(buttonKeycode);\n'
+            '\t\tbool downB = Input.GetKeyDown(mapped);\n'
+            '\t\tif ((Input.GetKey(buttonKeycode) && !downA) || Input.GetKeyUp(buttonKeycode))\n'
+            '\t\t{\n'
+            '\t\t\treturn false;\n'
+            '\t\t}\n'
+            '\t\tif ((Input.GetKey(mapped) && !downB) || Input.GetKeyUp(mapped))\n'
+            '\t\t{\n'
+            '\t\t\treturn false;\n'
+            '\t\t}\n'
+            '\t\treturn downA || downB;\n'
+            '\t}\n'
+        )),
+        ReplaceMember("MultiControllerInput.GetKey", (
+            '\tpublic bool GetKey(KeyCode buttonKeycode)\n'
+            '\t{\n'
+            '\t\tif (Input.GetKey(buttonKeycode))\n'
+            '\t\t{\n'
+            '\t\t\treturn true;\n'
+            '\t\t}\n'
+            '\t\tKeyCode mapped = MappedKey(buttonKeycode);\n'
+            '\t\treturn mapped != KeyCode.None && Input.GetKey(mapped);\n'
+            '\t}\n'
+        )),
+        ReplaceMember("MultiControllerInput.GetAxis", (
+            '\t// While a key mapped to the axis is held the axis reads a raw -1/0/+1 (no smoothing), and it\n'
+            '\t// falls back to the pad value (0 with no pad) on the frame the key is released, which Menu\n'
+            '\t// relies on to re-arm its D-pad repeat.\n'
+            '\tpublic float GetAxis(string axisName)\n'
+            '\t{\n'
+            '\t\tfloat keys = KeyboardAxis(axisName);\n'
+            '\t\tif (keys != 0f)\n'
+            '\t\t{\n'
+            '\t\t\treturn keys;\n'
+            '\t\t}\n'
+            '\t\treturn Input.GetAxis(axisName);\n'
+            '\t}\n'
+        )),
+        InsertAfter("MultiControllerInput.GetAxis", (
+            '\n'
+            '\tprivate static readonly Func<KeyCode, bool> s_KeyHeld = Input.GetKey;\n'
+            '\n'
+            '\tprivate float KeyboardAxis(string axisName)\n'
+            '\t{\n'
+            '\t\tif (axisName == null)\n'
+            '\t\t{\n'
+            '\t\t\treturn 0f;\n'
+            '\t\t}\n'
+            '\t\tKeyCode key;\n'
+            '\t\tbool positive = (m_debugAxisPositive.TryGetValue(axisName, out key) && Input.GetKey(key))\n'
+            '\t\t\t|| PortPad.PortPadKeyboard.AxisHeld(axisName, true, s_KeyHeld);\n'
+            '\t\tbool negative = (m_debugAxisNegative.TryGetValue(axisName, out key) && Input.GetKey(key))\n'
+            '\t\t\t|| PortPad.PortPadKeyboard.AxisHeld(axisName, false, s_KeyHeld);\n'
+            '\t\treturn (positive ? 1f : 0f) - (negative ? 1f : 0f);\n'
+            '\t}\n'
+        )),
+    ]),
 ]
 
 RECIPE = Recipe("021-keyboard-pad-mappings", STEPS)
