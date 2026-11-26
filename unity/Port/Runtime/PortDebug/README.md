@@ -197,3 +197,71 @@ The game reads the legacy input manager in its own code: `MultiControllerInput` 
 `GetButton*` and `GetAxis` for injected keys use the InputManager axis table that `PortBuild` writes to `StreamingAssets/PortInputAxes.json`, so `Return` also counts as `Submit`, `UpArrow` as positive `Vertical`, and so on.
 
 Limits: Assembly-CSharp-firstpass (Plugins, Standard Assets) still reads `UnityEngine.Input` directly. Mouse and touch are not injected.
+
+## Audio
+
+PortAudio (`unity/Port/Audio`, the managed replacement for Wwise) reads its options from the player command line through `PaOptions.Parse` (`Audio/Core/Observe/PaOptions.cs`). Flag names match case-insensitively and the last occurrence wins. Paths are made absolute. A bad or missing value logs a `[PortAudio] options: ...` warning and keeps the default; a value that looks like the next flag (`-port...`) is not swallowed.
+
+| Argument | `PaSettings` field | Effect |
+| --- | --- | --- |
+| `-portAudioTrace <file>` | `TracePath` | JSON-lines trace of what the audio engine does (see the kinds below). |
+| `-portAudioRecord <file.wav>` | `RecordPath` | Records the final mix as PCM16 WAV (see [Recorder](#recorder)). |
+| `-portAudioRoot <dir>` | `Root` | Reads converted audio from `<dir>` instead of `StreamingAssets/PortAudio`. |
+| `-portVoiceLanguage <name>` | `VoiceLanguage` | Voice language, a Wwise name (`English(US)`) or its key (`english_us`); default from the game. |
+| `-portAudioOff` | `Off` | PortAudio does nothing (the old silent backend behaviour). |
+| `-portAudioSuspendOnFocusLoss` | `SuspendOnFocusLoss` | Pauses all audio while the window has no focus (default: keep playing). |
+| `-portAudioVoices <n>` | `RealVoices` | Real (audible) voices, 1..4095, default 128. |
+| `-portAudioTrimDb <dB>` | `TrimDb` | Master trim in dB, -96..24, default 0. |
+| `-portAudioSeed <n>` | `Seed` | Seed for the random containers, 0..4294967295; default -1 = time based. |
+
+`pipeline/run_player.py` maps its flags onto these:
+
+| run_player | Player argument |
+| --- | --- |
+| `--audio-trace` | `-portAudioTrace work/runs/<name>/audio.jsonl` |
+| `--audio-record` | `-portAudioRecord work/runs/<name>/mix.wav` |
+| `--audio-root DIR` | `-portAudioRoot <DIR made absolute>` |
+| `--voice-language NAME` | `-portVoiceLanguage NAME` |
+| `--audio-off` | `-portAudioOff` |
+
+The rest go through `--extra`, for example `--extra '-portAudioSeed 7 -portAudioTrimDb -6'`. Without audio flags the player argv is unchanged.
+
+### Trace
+
+`PaTraceFile` (`Audio/Core/Observe/PaTraceFile.cs`) is the `IPaTraceSink` behind `PaLog.Trace`. Any thread may write (finalizers included); the line is formatted on the calling thread and a background thread appends the queue to the file every 0.5 s, so a killed player loses at most the last half second (and the last line may be cut, which the summary counts as a bad line). Each line:
+
+```
+{"t":12.345,"f":678,"kind":"post","id":3991942870,"name":"Play_Music_Frontend","go":18446744073709551615,"playingId":12}
+```
+
+`t` is realtime seconds since startup and `f` the frame count (`PaRuntime.Platform`); off the main thread `t` is extrapolated from the last main-thread reading and `f` is that reading's frame. NaN and infinities are written as `null`. More than 200000 pending lines are dropped and reported as one `traceDropped` line with a `count`.
+
+Kinds the run summary reads (other kinds are counted by name):
+
+| Kind | Emitted when | Fields read by the summary |
+| --- | --- | --- |
+| `post` | the game posts an event | `name` (else `id`) |
+| `resolve` | a posted event was found in a loaded bank and its actions ran | `name` (else `id`) |
+| `unknown` | a posted event is in no loaded bank (or the id is unknown) | `name` (else `id`) |
+| `start` | a voice (clip) started playing | - |
+| `stop` | a voice was stopped by an action or a fade | `reason` |
+| `end` | a voice ended | `reason` (`Finished`, `Stolen`, ...) |
+| `fail` | a voice could not play (`LoadFailed`, `NoMedia`) | `reason` (or `error`), `file` (else `media`, `node`, `name`, `id`) |
+| `bank` | a bank load or unload | `name` (else `id`), `status` (else `result`) |
+| `warn`, `error` | every `PaLog.Warn` / `PaLog.Error` | `msg` |
+| `level` | the recorder finished one second of the mix | `sec`, `rmsDb`, `peakDb`, `frames` |
+| `record` | recorder status: `start`, `listener` (tap moved, `name`, `scene`), `data` (first audio, `channels`, `rate`), `stop` / `noData` (`seconds`, `callbacks`, `overruns`, `mismatched`, `clipped`, `error`) | - |
+| `traceDropped` | the queue overflowed | `count` |
+
+### Recorder
+
+`PaRecorder` (`Audio/Unity/PaRecorder.cs`) starts from `IPaPlatform.StartRecorder` when `-portAudioRecord` is given. It creates a hidden DontDestroyOnLoad host that, once a second, finds the enabled `AudioListener` and attaches (or moves) a hidden `PaRecorderTap` component on that GameObject. Its `OnAudioFilterRead` sees the final mix and passes it through unchanged. The audio thread copies the samples into a preallocated single-producer ring (4 s at 8 channels) without allocating or locking; a writer thread feeds `PaWavWriter` (PCM16 at `AudioSettings.outputSampleRate`, channel count of the first callback) and `PaLevelMeter` (one `level` event per second: RMS and peak in dBFS, silence is -200).
+
+- The WAV header is patched and flushed after every second of audio, so the file is valid even when the player is killed; it then holds everything up to the last whole second.
+- When the listener is destroyed (scene change), nothing is recorded until the next check finds the new one, so the file can be a little shorter than the run. Ring overruns (writer too slow) and callbacks with a different channel count are dropped and counted in the `record` `stop` event.
+- No file is written when no audio ever reaches a listener: Unity audio disabled in the build (`m_DisableAudio`), no enabled `AudioListener`, or PortAudio off. The run summary prints a WARNING then.
+- The recording is taken before the OS mixer, so muting the Mac does not affect it. For unattended runs mute the output at OS level (`osascript -e 'set volume output muted true'`, and `false` afterwards) instead of using `AudioListener.volume` or `-portAudioTrimDb`, which change the recorded mix too.
+
+### Run summary
+
+With `--audio-trace` or `--audio-record` (or when `audio.jsonl` / `mix.wav` exist in the run folder), the `run_player` summary ends with an `audio:` section: trace event counts per kind, events posted / resolved / unknown with the most frequent unknown names, voice start / end / stop / fail counts with the top failures, bank results, PortAudio warnings and errors, audible seconds from the `level` events, and an analysis of `mix.wav`: duration, rate, channels, peak dBFS, audible seconds (0.1 s windows with RMS above -50 dBFS) and the longest silence with its start. A requested trace or recording that is missing, unreadable, empty or silent gets a WARNING line.

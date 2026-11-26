@@ -23,22 +23,35 @@ printed when no new timer screenshot appears for a while after the first one (a 
 --extra "<args>" appends arbitrary player arguments, split like a shell would (shlex), e.g.
 --extra '-portNoEnvFix' or --extra '-portNoLightShadows Spot,Point'.
 
+Audio (see unity/Port/Runtime/PortDebug/README.md, section Audio): --audio-trace writes the PortAudio
+trace to <run>/audio.jsonl (-portAudioTrace), --audio-record records the final mix to <run>/mix.wav
+(-portAudioRecord), --audio-root DIR reads converted audio from DIR instead of StreamingAssets/PortAudio
+(-portAudioRoot), --voice-language NAME picks the voice language (-portVoiceLanguage) and --audio-off
+switches PortAudio off (-portAudioOff). The summary then gets an "audio:" section: trace event counts,
+unknown events, voice starts/stops/failures, and an analysis of the recording (duration, peak, audible
+seconds, longest silence) with a WARNING when a requested recording is missing or silent.
+
 CLI: python3 -m pipeline.run_player [--name NAME] [--seconds 60] [--keys "3:cross,6:down"]
      [--fresh-save] [--no-image-effects [--fx-only T,T] [--fx-keep T,T]] [--render-summary]
      [--shot-interval SEC] [--key-shots] [--no-caffeinate] [--extra "-flag value ..."]
+     [--audio-trace] [--audio-record] [--audio-root DIR] [--voice-language NAME] [--audio-off]
 """
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import plistlib
 import re
 import shlex
 import shutil
+import struct
 import subprocess
 import sys
 import time
+import wave
+from array import array
 from collections import Counter
 from pathlib import Path
 
@@ -57,6 +70,11 @@ MIN_SHOT_INTERVAL = 0.1
 STALL_SECONDS = 8.0
 FIRST_SHOT_GRACE = 20.0
 STALL_HINT = "player stalled - display asleep? see pmset -g log | grep Display"
+AUDIO_TRACE = "audio.jsonl"
+AUDIO_RECORD = "mix.wav"
+AUDIBLE_DB = -50.0
+WAV_WINDOW = 0.1
+SILENT_DB = -200.0
 
 
 def find_executable(app: Path) -> Path:
@@ -94,7 +112,9 @@ def validate_types(spec: str) -> str:
 def player_argv(exe: Path, run_dir: Path, keys: str | None = None, width: int = 1280, height: int = 720,
                 save_dir: Path | None = None, no_image_effects: bool = False, fx_only: str | None = None,
                 fx_keep: str | None = None, shot_interval: float | None = None,
-                key_shots: bool = False, extra: list[str] | None = None) -> list[str]:
+                key_shots: bool = False, extra: list[str] | None = None, audio_trace: bool = False,
+                audio_record: bool = False, audio_root: Path | None = None, voice_language: str | None = None,
+                audio_off: bool = False) -> list[str]:
     argv = [str(exe), "-logFile", str(run_dir / "player.log"), "-portObserve", str(run_dir / "shots")]
     if keys:
         argv += ["-portKeys", keys]
@@ -110,6 +130,16 @@ def player_argv(exe: Path, run_dir: Path, keys: str | None = None, width: int = 
             argv += ["-portNoImageEffectsOnly", fx_only]
         if fx_keep:
             argv += ["-portKeepImageEffects", fx_keep]
+    if audio_trace:
+        argv += ["-portAudioTrace", str(run_dir / AUDIO_TRACE)]
+    if audio_record:
+        argv += ["-portAudioRecord", str(run_dir / AUDIO_RECORD)]
+    if audio_root is not None:
+        argv += ["-portAudioRoot", str(audio_root)]
+    if voice_language:
+        argv += ["-portVoiceLanguage", voice_language]
+    if audio_off:
+        argv.append("-portAudioOff")
     argv += ["-screen-width", str(width), "-screen-height", str(height), "-screen-fullscreen", "0"]
     return argv + list(extra or [])
 
@@ -401,6 +431,194 @@ def render_summary(events: list[dict], dummies: dict[str, str], scene: str = "Ho
     return out
 
 
+def _num(v) -> float | None:
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    f = float(v)
+    return f if math.isfinite(f) else None
+
+
+def _label(e: dict, *keys: str) -> str:
+    """First present of the keys (name before id), as text; '?' when none."""
+    for k in keys:
+        v = e.get(k)
+        if v is not None and v != "":
+            return str(v)
+    return "?"
+
+
+def parse_audio_events(text: str) -> dict:
+    """Read PortAudio's audio.jsonl. Bad lines (not a JSON object, e.g. the truncated last line of a
+    killed player) are counted, never fatal; missing fields fall back to '?'."""
+    kinds, posted, resolved, unknown = Counter(), Counter(), Counter(), Counter()
+    failed, banks, problems = Counter(), Counter(), Counter()
+    levels: list[dict] = []
+    lines = bad = 0
+    last_t = None
+    for raw in text.splitlines():
+        if not raw.strip():
+            continue
+        try:
+            e = json.loads(raw)
+        except ValueError:
+            bad += 1
+            continue
+        if not isinstance(e, dict):
+            bad += 1
+            continue
+        lines += 1
+        kind = e.get("kind") if isinstance(e.get("kind"), str) and e.get("kind") else "?"
+        kinds[kind] += 1
+        t = _num(e.get("t"))
+        if t is not None:
+            last_t = t
+        if kind == "post":
+            posted[_label(e, "name", "id")] += 1
+        elif kind == "resolve":
+            resolved[_label(e, "name", "id")] += 1
+        elif kind == "unknown":
+            unknown[_label(e, "name", "id")] += 1
+        elif kind == "fail":
+            what = _label(e, "file", "media", "node", "name", "id")
+            failed[f"{_label(e, 'reason', 'error')} {what}"] += 1
+        elif kind == "bank":
+            banks[f"{_label(e, 'name', 'id')} {_label(e, 'status', 'result')}"] += 1
+        elif kind in ("warn", "error"):
+            problems[f"[{kind}] {str(e.get('msg', '?')).splitlines()[0][:300] if e.get('msg') else '?'}"] += 1
+        elif kind == "level":
+            rms, peak = _num(e.get("rmsDb")), _num(e.get("peakDb"))
+            if rms is not None:
+                levels.append({"sec": _num(e.get("sec")), "rmsDb": rms,
+                               "peakDb": peak if peak is not None else rms})
+    return {"lines": lines, "bad": bad, "kinds": kinds, "posted": posted, "resolved": resolved,
+            "unknown": unknown, "failed": failed, "banks": banks, "problems": problems,
+            "levels": levels, "last_t": last_t}
+
+
+def _db(x: float) -> float:
+    return 20.0 * math.log10(x) if x > 0 else SILENT_DB
+
+
+def _sum_squares(a: array) -> float:
+    sp = getattr(math, "sumprod", None)
+    if sp is not None:
+        return float(sp(a, a))
+    return float(sum(v * v for v in a))
+
+
+def analyze_wav(path: Path, window: float = WAV_WINDOW, audible_db: float = AUDIBLE_DB) -> dict | None:
+    """Duration, peak dBFS, audible seconds (windows with RMS above `audible_db`) and the longest
+    silence of a PCM WAV; None when the file does not exist, {"error": ...} when it cannot be read."""
+    path = Path(path)
+    if not path.is_file():
+        return None
+    try:
+        with wave.open(str(path), "rb") as w:
+            channels, width, rate, frames = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
+            if width not in (1, 2, 4) or rate <= 0 or channels <= 0:
+                return {"error": f"unsupported WAV: {width * 8}-bit, {rate} Hz, {channels} ch"}
+            full = float(1 << (8 * width - 1))
+            per = max(1, int(round(rate * window)))
+            peak = 0.0
+            audible = longest = run = 0.0
+            run_start = silence_at = 0.0
+            total = 0
+            while True:
+                data = w.readframes(per)
+                if not data:
+                    break
+                a = array({1: "B", 2: "h", 4: "i"}[width])
+                usable = len(data) - len(data) % a.itemsize
+                a.frombytes(data[:usable])
+                if width == 1:
+                    a = array("i", (v - 128 for v in a))
+                elif sys.byteorder == "big":
+                    a.byteswap()
+                if not a:
+                    break
+                n_frames = len(a) // channels
+                dur = n_frames / rate
+                start = total / rate
+                total += n_frames
+                hi = max(abs(max(a)), abs(min(a))) / full
+                peak = max(peak, hi)
+                rms = math.sqrt(_sum_squares(a) / len(a)) / full
+                if _db(rms) > audible_db:
+                    audible += dur
+                    run = 0.0
+                else:
+                    if run == 0.0:
+                        run_start = start
+                    run += dur
+                    if run > longest + 1e-9:
+                        longest, silence_at = run, run_start
+    except (wave.Error, EOFError, OSError, ValueError, struct.error) as ex:
+        return {"error": f"{type(ex).__name__}: {ex}"}
+    return {"path": str(path), "rate": rate, "channels": channels, "bits": width * 8,
+            "duration": total / rate, "peak_db": _db(peak), "audible": round(audible, 6),
+            "longest_silence": round(longest, 6), "silence_at": round(silence_at, 6),
+            "frames_in_header": frames}
+
+
+def _top(counter: Counter, limit: int, indent: str = "    ") -> list[str]:
+    return [f"{indent}(x{n}) {m}" for m, n in counter.most_common(limit)]
+
+
+def audio_summary(events: dict | None, wav: dict | None, *, trace_path: Path | None = None,
+                  trace_requested: bool = False, record_path: Path | None = None,
+                  record_requested: bool = False, top: int = 10) -> list[str]:
+    """The "audio:" section of the run summary (lines without a trailing newline)."""
+    out = ["audio:"]
+    if events is None:
+        if trace_requested:
+            out.append(f"  WARNING: audio trace requested but missing: {trace_path} "
+                       "(PortAudio off or not initialized?)")
+    else:
+        k = events["kinds"]
+        out.append(f"  trace: {trace_path or AUDIO_TRACE}: {events['lines']} events"
+                   + (f", {events['bad']} bad lines" if events["bad"] else "")
+                   + (f", last t={events['last_t']:.2f}" if events.get("last_t") is not None else ""))
+        out.append("  kinds: " + (", ".join(f"{n}={c}" for n, c in sorted(k.items())) or "none"))
+        p, r, u = events["posted"], events["resolved"], events["unknown"]
+        out.append(f"  events: posted {sum(p.values())} ({len(p)} distinct), resolved {sum(r.values())}, "
+                   f"unknown {sum(u.values())} ({len(u)} distinct)")
+        if u:
+            out.append("  top unknown events:")
+            out += _top(u, top)
+        out.append(f"  voices: start {k.get('start', 0)}, end {k.get('end', 0)}, stop {k.get('stop', 0)}, "
+                   f"fail {k.get('fail', 0)}")
+        if events["failed"]:
+            out.append("  top voice failures:")
+            out += _top(events["failed"], top)
+        if events["banks"]:
+            out.append(f"  banks ({sum(events['banks'].values())}):")
+            out += _top(events["banks"], top)
+        if events["problems"]:
+            out.append(f"  warnings/errors: {len(events['problems'])} distinct, "
+                       f"{sum(events['problems'].values())} total")
+            out += _top(events["problems"], top)
+        lv = events["levels"]
+        if lv:
+            loud = sum(1 for x in lv if x["rmsDb"] > AUDIBLE_DB)
+            out.append(f"  levels: audible {loud} of {len(lv)} s, peak {max(x['peakDb'] for x in lv):.1f} dBFS "
+                       f"(recorder level events, RMS above {AUDIBLE_DB:g} dBFS)")
+    if wav is None:
+        if record_requested:
+            out.append(f"  WARNING: recording requested but missing: {record_path} (no audio callback: "
+                       "Unity audio disabled in the build, no enabled AudioListener, or PortAudio off?)")
+    elif "error" in wav:
+        out.append(f"  WARNING: recording unreadable: {record_path}: {wav['error']}")
+    else:
+        out.append(f"  mix: {record_path or wav.get('path')}: {wav['duration']:.1f} s, {wav['rate']} Hz, "
+                   f"{wav['channels']} ch, peak {wav['peak_db']:.1f} dBFS, audible {wav['audible']:.1f} s, "
+                   f"longest silence {wav['longest_silence']:.1f} s at {wav['silence_at']:.1f} s")
+        if wav["duration"] <= 0:
+            out.append("  WARNING: recording is empty")
+        elif wav["audible"] <= 0:
+            out.append(f"  WARNING: recording is silent (no {WAV_WINDOW:g} s window above {AUDIBLE_DB:g} dBFS RMS)")
+    return out
+
+
 def screenshots(shots: Path) -> list[Path]:
     return sorted(p for p in Path(shots).glob("*.png")) if Path(shots).is_dir() else []
 
@@ -408,7 +626,8 @@ def screenshots(shots: Path) -> list[Path]:
 def run(exe: Path, run_dir: Path, seconds: float, keys: str | None, fresh_save: bool = False,
         no_image_effects: bool = False, fx_only: str | None = None, fx_keep: str | None = None,
         shot_interval: float | None = None, key_shots: bool = False, caffeinate: bool = True,
-        warnings: list[str] | None = None, extra: list[str] | None = None) -> int | None:
+        warnings: list[str] | None = None, extra: list[str] | None = None,
+        audio: dict | None = None) -> int | None:
     (run_dir / "shots").mkdir(parents=True, exist_ok=True)
     save_dir = None
     if fresh_save:
@@ -416,7 +635,7 @@ def run(exe: Path, run_dir: Path, seconds: float, keys: str | None, fresh_save: 
         save_dir.mkdir(parents=True, exist_ok=True)
     argv = player_argv(exe, run_dir, keys, save_dir=save_dir, no_image_effects=no_image_effects,
                        fx_only=fx_only, fx_keep=fx_keep, shot_interval=shot_interval, key_shots=key_shots,
-                       extra=extra)
+                       extra=extra, **(audio or {}))
     awake = None
     caff = caffeinate_argv(os.getpid()) if caffeinate else None
     if caff:
@@ -463,7 +682,7 @@ def run(exe: Path, run_dir: Path, seconds: float, keys: str | None, fresh_save: 
 
 
 def report(run_dir: Path, rc: int | None, top: int = 25, dummies: dict[str, str] | None = None,
-           warnings: list[str] | None = None) -> str:
+           warnings: list[str] | None = None, audio_trace: bool = False, audio_record: bool = False) -> str:
     log = run_dir / "player.log"
     p = parse_player_log(log.read_text(errors="replace") if log.is_file() else "")
     events = run_dir / "shots" / "log.jsonl"
@@ -497,6 +716,11 @@ def report(run_dir: Path, rc: int | None, top: int = 25, dummies: dict[str, str]
         render = run_dir / "shots" / "render.jsonl"
         events = parse_render_events(render.read_text(errors="replace")) if render.is_file() else []
         out += render_summary(events, dummies)
+    trace, mix = run_dir / AUDIO_TRACE, run_dir / AUDIO_RECORD
+    if audio_trace or audio_record or trace.is_file() or mix.is_file():
+        a = parse_audio_events(trace.read_text(errors="replace")) if trace.is_file() else None
+        out += audio_summary(a, analyze_wav(mix), trace_path=trace, trace_requested=audio_trace,
+                             record_path=mix, record_requested=audio_record)
     out.append(f"log: {log}")
     return "\n".join(out)
 
@@ -542,6 +766,15 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--extra", metavar="ARGS",
                     help="extra player arguments, split shell-like and appended to the player argv "
                          "(e.g. --extra '-portCameraHdr -portNoLightShadows Spot')")
+    ap.add_argument("--audio-trace", action="store_true",
+                    help="write the PortAudio trace to work/runs/<name>/audio.jsonl (-portAudioTrace)")
+    ap.add_argument("--audio-record", action="store_true",
+                    help="record the final mix to work/runs/<name>/mix.wav (-portAudioRecord)")
+    ap.add_argument("--audio-root", type=Path, metavar="DIR",
+                    help="read converted audio from DIR instead of StreamingAssets/PortAudio (-portAudioRoot)")
+    ap.add_argument("--voice-language", metavar="NAME",
+                    help="voice language, e.g. 'English(US)' or english_us (-portVoiceLanguage)")
+    ap.add_argument("--audio-off", action="store_true", help="switch PortAudio off (-portAudioOff)")
     return ap
 
 
@@ -568,10 +801,14 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     dummies = dummy_shaders(c.work_dir / "project") if a.render_summary else None
     warnings: list[str] = []
+    audio = {"audio_trace": a.audio_trace, "audio_record": a.audio_record,
+             "audio_root": a.audio_root.resolve() if a.audio_root else None,
+             "voice_language": a.voice_language, "audio_off": a.audio_off}
     rc = run(exe, run_dir, a.seconds, keys, fresh_save=a.fresh_save, no_image_effects=a.no_image_effects,
              fx_only=fx_only, fx_keep=fx_keep, shot_interval=shot_interval, key_shots=a.key_shots,
-             caffeinate=not a.no_caffeinate, warnings=warnings, extra=extra)
-    print(report(run_dir, rc, dummies=dummies, warnings=warnings))
+             caffeinate=not a.no_caffeinate, warnings=warnings, extra=extra, audio=audio)
+    print(report(run_dir, rc, dummies=dummies, warnings=warnings, audio_trace=a.audio_trace,
+                 audio_record=a.audio_record))
     return 0 if rc in (None, 0) else 1
 
 
