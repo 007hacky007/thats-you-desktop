@@ -126,7 +126,8 @@ SubShader {
 }
 
 // Fallback without structured buffers: Apply adds nothing, Collect passes the
-// image through.
+// image through. The CGINCLUDE block above is prepended to these programs too,
+// so they already get UnityCG.cginc and the _MainTex declaration from it.
 SubShader {
     Cull Off ZWrite Off ZTest Always
 
@@ -135,7 +136,6 @@ SubShader {
         CGPROGRAM
         #pragma vertex vert_img
         #pragma fragment frag
-        #include "UnityCG.cginc"
         float4 frag(v2f_img i) : SV_Target { return 0.0; }
         ENDCG
     }
@@ -144,8 +144,6 @@ SubShader {
         CGPROGRAM
         #pragma vertex vert_img
         #pragma fragment frag
-        #include "UnityCG.cginc"
-        sampler2D _MainTex;
         float4 frag(v2f_img i) : SV_Target { return tex2D(_MainTex, i.uv); }
         ENDCG
     }
