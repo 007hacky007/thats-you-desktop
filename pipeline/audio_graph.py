@@ -25,7 +25,7 @@ from pathlib import Path
 
 from pipeline import wwise_bank as wb
 
-VERSION = "2"
+VERSION = "3"
 FORMAT = 1
 LI_FOLDER = "LocaleIndependent"
 DEFAULT_LANGUAGE = "English(UK)"
@@ -651,24 +651,34 @@ def reach_event(event_id: int, scope: Scope) -> tuple[list[dict], list[int]]:
 
 
 PLAY_ACTIONS = ("play", "playAndContinue")
+# Every action kind the bank parser names except the ones that play something. "other" (a kind the
+# parser does not know) is deliberately absent, so an unknown action is never assumed to be harmless.
+CONTROL_ACTIONS = frozenset(wb.ACTION_NAMES.values()) - {"play", "playAndContinue", "playEvent"}
 
 
 def control_only(event: dict, scope: Scope, _seen: set | None = None) -> bool:
-    """True when every action of the event is known and none plays a node, directly or through
-    PlayEvent chains (stop, pause, resume, set game parameter...). Such events reach no media by design."""
+    """True when the event has at least one action, every action is a known non-playing kind (stop, pause,
+    resume, set game parameter...) or a PlayEvent chain to such events. Such events reach no media by design.
+    An event with no actions, or with an action no bank defines or the parser does not know, is not."""
     seen = _seen if _seen is not None else set()
     seen.add(event["id"])
-    for aid in event.get("actions", []):
+    actions = event.get("actions", [])
+    if not actions:
+        return False
+    for aid in actions:
         hit = scope.objects.get(aid)
-        if hit is None or hit[0].get("action") in PLAY_ACTIONS:
+        if hit is None:
             return False
-        if hit[0].get("action") == "playEvent":
+        kind = hit[0].get("action")
+        if kind == "playEvent":
             tid = hit[0].get("target")
             if tid in seen:
                 continue
             target = scope.objects.get(tid)
             if target is None or target[0]["type"] != "Event" or not control_only(target[0], scope, seen):
                 return False
+        elif kind not in CONTROL_ACTIONS:
+            return False
     return True
 
 

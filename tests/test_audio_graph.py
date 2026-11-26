@@ -367,6 +367,9 @@ class ReportClassificationTest(unittest.TestCase):
             ev(8, [81, 82]), act(81, "setGameParameter", 0), act(82, "playEvent", 7),  # chain to control only
             ev(9, [91]), act(91, "playEvent", 1),          # chain to a Play
             ev(10, [101]), act(101, "playEvent", 10),      # self loop, plays nothing
+            ev(11, [111]), act(111, "other", 0),           # action kind the parser does not know
+            ev(12, [121, 122, 123]), act(121, "setState", 0), act(122, "setSwitch", 0), act(123, "mute", 0),
+            ev(13, [131]), act(131, "playEvent", 4),       # chain to an event with no actions
         ]
         cz = [{"type": "Sound", "id": 500, "source": {"kind": "vorbis", "id": 9, "stream": "embedded"}}]
         banks = [_bank(ag.LI_FOLDER, "SFX", li), _bank("Czech", "Voice", cz)]
@@ -374,7 +377,6 @@ class ReportClassificationTest(unittest.TestCase):
 
     def test_control_only(self):
         self.assertTrue(self.ev[3]["controlOnly"])
-        self.assertTrue(self.ev[4]["controlOnly"])
         self.assertTrue(self.ev[7]["controlOnly"])
         self.assertTrue(self.ev[8]["controlOnly"])
         self.assertTrue(self.ev[10]["controlOnly"])
@@ -382,6 +384,15 @@ class ReportClassificationTest(unittest.TestCase):
         for i in (1, 2, 6):  # 6 chains to an event in no bank
             self.assertFalse(self.ev[i]["controlOnly"])
         self.assertFalse(self.ev[5]["controlOnly"])  # unknown action: not provably control-only
+        self.assertTrue(self.ev[12]["controlOnly"])
+
+    def test_event_without_actions_is_not_control_only(self):
+        self.assertFalse(self.ev[4]["controlOnly"])
+        self.assertTrue(self.ev[4]["reachesNothing"])
+        self.assertFalse(self.ev[13]["controlOnly"])
+
+    def test_unknown_action_kind_is_not_control_only(self):
+        self.assertFalse(self.ev[11]["controlOnly"])
 
     def test_dead_targets(self):
         self.assertEqual(self.ev[1]["missingTargets"], [500])
