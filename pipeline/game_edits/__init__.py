@@ -7,8 +7,8 @@ names files, types and members and says what to do with them. Recipes hold no ga
 locate things by name (and, inside one member, by short identifier patterns) and the code they
 insert is the port's own.
 
-    python3 -m pipeline.game_edits --project DIR       apply every recipe to an exported project
-    python3 -m pipeline.game_edits --verify            (owner only) compare with the old patches
+pipeline.build_all applies every recipe (apply_all) when it prepares the project.
+python3 -m pipeline.game_edits.verify (owner only) compares the result with the old private patches.
 
 Operations work on text. A member is found by its dotted name ("Type.Member", nested types
 "Outer.Inner.Member", overloads "Type.Member#2" in file order) with a small C# scanner that
