@@ -104,3 +104,21 @@ class FinishTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LockTest(unittest.TestCase):
+    def test_second_builder_on_the_same_folder_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            with steps.work_lock(Path(d)):
+                with self.assertRaises(steps.BuildError) as cm:
+                    with steps.work_lock(Path(d)):
+                        pass
+                self.assertIn("already", str(cm.exception))
+            with steps.work_lock(Path(d)):  # released after the first one ended
+                pass
+
+    def test_stale_lock_of_a_dead_process_is_taken_over(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / steps.LOCK_FILE).write_text("999999")
+            with steps.work_lock(Path(d)):
+                pass

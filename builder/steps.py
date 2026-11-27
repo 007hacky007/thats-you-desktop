@@ -10,6 +10,7 @@ tools bundled with the builder through IWYK_PREBUILT_DIR.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -25,6 +26,7 @@ from builder.state import State
 
 NEED_GB = 60
 CONFIG_FILE = "builder-config.json"
+LOCK_FILE = ".builder.lock"
 
 Progress = Callable[[float, str], None]
 
@@ -99,6 +101,56 @@ def finish(build: Path, out: Path) -> Path:
         shutil.move(str(item), str(target))
     build.rmdir()
     return out
+
+
+def _alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+        h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        code = ctypes.c_ulong()
+        ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(code))
+        ctypes.windll.kernel32.CloseHandle(h)
+        return code.value == 259  # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+@contextlib.contextmanager
+def work_lock(work: Path):
+    """Only one builder at a time per work folder (two would delete each other's files)."""
+    work = Path(work)
+    work.mkdir(parents=True, exist_ok=True)
+    lock = work / LOCK_FILE
+    for _ in range(2):
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except FileExistsError:
+            try:
+                pid = int(lock.read_text().strip() or 0)
+            except (OSError, ValueError):
+                pid = 0
+            if _alive(pid):
+                raise BuildError("another builder is already building in this folder; "
+                                 "wait for it or close it first") from None
+            lock.unlink(missing_ok=True)
+    else:
+        raise BuildError(f"cannot lock {work}")
+    try:
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        yield
+    finally:
+        lock.unlink(missing_ok=True)
 
 
 def _digest(*parts) -> str:
@@ -277,5 +329,6 @@ def build(c: Choices, progress: Progress, log: Callable[[str], None] = print) ->
         os.environ.setdefault("IWYK_PREBUILT_DIR", str(Path(sys._MEIPASS) / "prebuilt"))  # noqa: SLF001
     os.environ["IWYK_CONFIG"] = str(c.work / CONFIG_FILE)  # every pipeline step reads this build's config
     ctx = Context(c, log=log)
-    run_all(plan(c), ctx, State(c.work), progress)
+    with work_lock(c.work):
+        run_all(plan(c), ctx, State(c.work), progress)
     return ctx.extra["output"]
