@@ -12,6 +12,8 @@ def main(argv=None) -> int:
     if not argv:
         from builder import gui
         return gui.main()
+    if argv == ["--self-test"]:
+        return self_test()
     from builder import steps
     ap = argparse.ArgumentParser(prog="builder", description=__doc__.splitlines()[0])
     ap.add_argument("--base", type=Path, required=True, help="PS4 base game: folder or .pkg")
@@ -36,6 +38,29 @@ def main(argv=None) -> int:
         return 1
     print(f"done: the game is in {out}")
     return 0
+
+
+def self_test() -> int:
+    """Checks a packaged builder: bundled files, libraries and prebuilt tools are all there."""
+    import os
+    from builder import steps  # noqa: F401
+    from pipeline import build_web, cf_account, csc_check, game_edits, pkg, tools, unity, web_common  # noqa: F401
+    import cryptography.hazmat.primitives.ciphers  # noqa: F401
+    import PySide6.QtWidgets  # noqa: F401
+    root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    want = [web_common.WEB_SRC / "index.html", csc_check.PORT_DIR, tools.VERSIONS, cf_account.LOCK_DIR / "package-lock.json",
+            root / "native" / "iwyknet" / "unity"]
+    if getattr(sys, "frozen", False):
+        pre = root / "prebuilt"
+        want += [pre / "native" / ("win-x64" if sys.platform == "win32" else "macos-arm64")]
+        if sys.platform == "darwin":
+            want.append(pre / "vgmstream-cli")
+    missing = [str(p) for p in want if not Path(p).exists()]
+    n = len(game_edits.all_recipes())
+    print(f"self-test: {n} game edit recipes, {len(want) - len(missing)}/{len(want)} bundled paths present")
+    for m in missing:
+        print("missing:", m)
+    return 1 if missing or n == 0 else 0
 
 
 if __name__ == "__main__":

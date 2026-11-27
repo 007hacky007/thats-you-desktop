@@ -1,0 +1,73 @@
+name: release
+
+# Builds the builder apps when a version tag is pushed and attaches them to a draft release.
+# The draft is published by hand after checking it.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: macos-arm64
+            artifact: ThatsYou-Builder-macOS.dmg
+          - os: windows-2022
+            platform: win-x64
+            artifact: ThatsYou-Builder-Windows.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: native/iwyknet/go.mod
+          cache-dependency-path: native/iwyknet/go.sum
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python packages
+        run: python -m pip install PySide6==6.12.0 cryptography pyinstaller Pillow
+      - name: Tests
+        run: python -m unittest discover -s tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - name: Network library
+        shell: bash
+        env:
+          IWYK_WIN_CC: gcc
+        run: |
+          python -m pipeline.build_native --platform ${{ matrix.platform }}
+          mkdir -p prebuilt/native
+          cp -R work/native/${{ matrix.platform }} prebuilt/native/
+      - name: Audio converter (macOS)
+        if: matrix.platform == 'macos-arm64'
+        shell: bash
+        run: |
+          python -c "from pathlib import Path; from pipeline import audio_tools; import shutil; shutil.copy(audio_tools.ensure_vgmstream(Path('work')), 'prebuilt/vgmstream-cli')"
+      - name: Package
+        run: python -m builder.package --prebuilt prebuilt --out work/package
+      - name: Self-test (macOS)
+        if: matrix.platform == 'macos-arm64'
+        shell: bash
+        run: '"work/package/dist/That''s You! Builder.app/Contents/MacOS/That''s You! Builder" --self-test'
+      - name: Self-test (Windows)
+        if: matrix.platform == 'win-x64'
+        run: work/package/ThatsYou-Builder-Windows.exe --self-test
+      - name: Source archive
+        if: matrix.platform == 'macos-arm64'
+        run: git archive --format=tar.gz --prefix=thats-you-desktop/ -o work/package/thats-you-desktop-source.tar.gz HEAD
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            work/package/${{ matrix.artifact }}
+            work/package/${{ matrix.artifact }}.sha256
+            work/package/thats-you-desktop-source.tar.gz
+          fail_on_unmatched_files: false
