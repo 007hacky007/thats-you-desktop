@@ -165,6 +165,7 @@ def main(argv=None) -> int:
     ap.add_argument("--keys", default="8:Return,20:Return,30:Return",
                     help="TV key script for the language select and splash (run_player --keys format)")
     ap.add_argument("--headful", action="store_true")
+    ap.add_argument("--app", type=Path, help="game to run (default work/builds/mac/ThatsYou.app)")
     ap.add_argument("--tunnel", action="store_true",
                     help="use the page address the game itself publishes (tunnel mode build)")
     ap.add_argument("--page-url", default="", metavar="URL",
@@ -191,7 +192,7 @@ def main(argv=None) -> int:
     join_file = run_dir / "join-url.txt"
     if not a.tunnel:
         os.environ["IWYK_PAGE_URL"] = base  # the player inherits it; local test only
-    exe = run_player.find_executable(c.work_dir / "builds" / "mac" / "ThatsYou.app")
+    exe = run_player.find_executable(a.app or c.work_dir / "builds" / "mac" / "ThatsYou.app")
     seconds = a.minutes * 60 + 60
     result: dict = {}
     stop_player = threading.Event()
