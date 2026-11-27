@@ -28,6 +28,11 @@ RESULT = re.compile(r"Build Finished, Result: (\w+)")
 TARGETS = {"mac": ("PortBuild.BuildMac", "OSXUniversal"), "win": ("PortBuild.BuildWin", "Win64")}
 
 
+def host_target() -> str:
+    """The player target of the machine the build runs on."""
+    return "win" if sys.platform == "win32" else "mac"
+
+
 def build_argv(editor: Path, project: Path, log: Path, target: str = "mac") -> list[str]:
     method, build_target = TARGETS[target]
     return [str(editor), "-batchmode", "-quit", "-projectPath", str(project),
@@ -148,10 +153,11 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--project", type=Path, help="Unity project (default work/project)")
     ap.add_argument("--log", type=Path, help="log file (default work/reports/build-<target>.log)")
-    ap.add_argument("--target", choices=sorted(TARGETS), default="mac")
+    ap.add_argument("--target", choices=sorted(TARGETS), default=host_target())
     a = ap.parse_args(argv)
     c = config.load()
-    build_all.check_unity_editor(c.unity_editor)
+    editor = config.editor(c)
+    build_all.check_unity_editor(editor)
     project = (a.project or c.work_dir / "project").resolve()
     log = (a.log or c.work_dir / "reports" / f"build-{a.target}.log").resolve()
     holders = lock_holders(project)
@@ -164,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     log.parent.mkdir(parents=True, exist_ok=True)
     if log.exists():
         log.unlink()
-    argv_ = build_argv(c.unity_editor, project, log, a.target)
+    argv_ = build_argv(editor, project, log, a.target)
     print("running:", " ".join(argv_), flush=True)
     rc = subprocess.run(argv_).returncode
     s = summarize_log(log.read_text(errors="replace") if log.is_file() else "")

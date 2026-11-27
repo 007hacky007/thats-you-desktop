@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -67,6 +68,11 @@ def ensure_vgmstream(work_dir: Path, *, plat: str | None = None, ensure=tools.en
     """Path to a vgmstream-cli executable for this host, downloading/building it when needed."""
     work_dir = Path(work_dir)
     plat = plat or tools.current_platform()
+    pre = os.environ.get("IWYK_PREBUILT_DIR")
+    if pre:  # the builder app ships a prebuilt vgmstream-cli
+        exe = Path(pre) / ("vgmstream-cli.exe" if plat.startswith("win") else "vgmstream-cli")
+        if exe.is_file():
+            return exe
     versions = _versions()
     if plat.startswith("win"):
         dest = ensure("vgmstream", work_dir)

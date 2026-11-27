@@ -51,8 +51,18 @@ DUMP_OUTPUTS = ("dump.cs", "script.json", "il2cpp.h", "DummyDll")
 DUMP_MARKER = ".dump-complete"
 
 
-def run_il2cppdumper(apk_dir: Path, tool_dir: Path, out: Path) -> None:
-    dotnet = shutil.which("dotnet")
+def dotnet_exe(work_dir: Path, which=shutil.which, ensure=tools.ensure, plat: str | None = None) -> str:
+    """'dotnet' from PATH, else the pinned portable .NET runtime downloaded into work/tools."""
+    found = which("dotnet")
+    if found:
+        return found
+    plat = plat or tools.current_platform()
+    dest = Path(ensure("dotnet", work_dir))
+    return str(dest / ("dotnet.exe" if plat.startswith("win") else "dotnet"))
+
+
+def run_il2cppdumper(apk_dir: Path, tool_dir: Path, out: Path, dotnet: str | None = None) -> None:
+    dotnet = dotnet or shutil.which("dotnet")
     if not dotnet:
         raise RuntimeError("Il2CppDumper needs the .NET runtime: install it so that 'dotnet' is on PATH")
     out = Path(out)
@@ -88,7 +98,8 @@ def main() -> None:
         return
     apk_dir = c.work_dir / "apk"
     unzip_apk(c.apk, apk_dir)
-    run_il2cppdumper(apk_dir, tools.ensure("il2cppdumper", c.work_dir), c.work_dir / "export" / "app-il2cpp")
+    run_il2cppdumper(apk_dir, tools.ensure("il2cppdumper", c.work_dir), c.work_dir / "export" / "app-il2cpp",
+                     dotnet=dotnet_exe(c.work_dir))
     key = apk_key(c.apk) + json.dumps(APP_SETTINGS, sort_keys=True)
     assetripper.export(apk_dir, c.work_dir / "export" / "app", APP_SETTINGS, exe=assetripper.default_exe(c.work_dir),
                        key=key)

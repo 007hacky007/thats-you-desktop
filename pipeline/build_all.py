@@ -133,12 +133,12 @@ def build_project(c: config.Config, pristine: Path, project: Path, *, prepare=pr
     w = c.work_dir
     log("project rebuilt:", prepare(pristine, project, GameEdits))
     (audio_build or audio.build)(w, project)
-    return import_(c.unity_editor, project, w / "merged" / "Media", w / "reports")
+    return import_(config.editor(c), project, w / "merged" / "Media", w / "reports")
 
 
 def main() -> None:
     c = config.load()
-    check_unity_editor(c.unity_editor)
+    check_unity_editor(config.editor(c))
     w = c.work_dir
     print("merge:", merge.merge(c.base_dump, c.patch_dump, w / "merged"))
     extract_game.main()

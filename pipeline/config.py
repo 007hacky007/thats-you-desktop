@@ -56,3 +56,11 @@ def load(path: Path | None = None) -> Config:
     work = Path(data["work_dir"]).expanduser() if data.get("work_dir") else REPO_ROOT / "work"
     unity = Path(data["unity_editor"]).expanduser() if data.get("unity_editor") else None
     return Config(base, patch, apk, work, unity, data.get("phone_page_url") or None)
+
+
+def editor(c: Config) -> Path | None:
+    """The Unity editor: the configured one, else the pinned version found in Unity Hub's folders."""
+    if c.unity_editor:
+        return c.unity_editor
+    from pipeline import unity
+    return unity.find_editor()
