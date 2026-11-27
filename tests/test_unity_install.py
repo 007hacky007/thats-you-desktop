@@ -34,7 +34,7 @@ class StatusTest(unittest.TestCase):
 
         self.assertTrue(unity_install.licensed(Path("/u/Unity"), run=run))
         argv = calls[0]
-        self.assertEqual(argv[0], "/u/Unity")
+        self.assertEqual(argv[0], str(Path("/u/Unity")))
         for flag in ("-batchmode", "-quit", "-nographics", "-createProject"):
             self.assertIn(flag, argv)
 
@@ -46,7 +46,7 @@ class HubTest(unittest.TestCase):
 
     def test_headless_install_argv(self):
         argv = unity_install.install_argv(Path("/h/Unity Hub"), "6000.6.10f1", "40e81493c67d")
-        self.assertEqual(argv, ["/h/Unity Hub", "--", "--headless", "install", "--version", "6000.6.10f1",
+        self.assertEqual(argv, [str(Path("/h/Unity Hub")), "--", "--headless", "install", "--version", "6000.6.10f1",
                                 "--changeset", "40e81493c67d"])
 
     def test_install_needs_hub_and_reports_failure(self):

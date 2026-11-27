@@ -178,7 +178,7 @@ class BuildTest(unittest.TestCase):
         return json.loads((self.out / rel).read_text())
 
     def test_layout_and_manifest(self):
-        files = sorted(str(p.relative_to(self.out)) for p in self.out.rglob("*.json"))
+        files = sorted(p.relative_to(self.out).as_posix() for p in self.out.rglob("*.json"))
         self.assertEqual(files, ["banks/Init.json", "banks/SFX_Bank.json", "banks/czech/Voice_Bank.json",
                                  "banks/english_uk/Voice_Bank.json", "manifest.json"])
         m = self.load("manifest.json")
