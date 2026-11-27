@@ -21,7 +21,10 @@ class WebConfigError(Exception):
 
 def load_local(path: Path | None = None) -> dict:
     """config/local.json as a dict; {} when the file does not exist."""
-    path = Path(path) if path else DEFAULT_CONFIG
+    if path is None:
+        from pipeline import config
+        path = config.config_path()
+    path = Path(path)
     if not path.is_file():
         return {}
     try:

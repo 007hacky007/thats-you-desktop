@@ -36,8 +36,15 @@ def _required_dir(data: dict, key: str) -> Path:
     return p
 
 
+def config_path() -> Path:
+    """config/local.json, or the file named by IWYK_CONFIG (the builder app writes its own)."""
+    import os
+    env = os.environ.get("IWYK_CONFIG")
+    return Path(env) if env else DEFAULT_PATH
+
+
 def load(path: Path | None = None) -> Config:
-    path = Path(path) if path else DEFAULT_PATH
+    path = Path(path) if path else config_path()
     if not path.is_file():
         raise ConfigError("config", f"file not found: {path} (copy config/local.example.json)")
     data = json.loads(path.read_text(encoding="utf-8"))

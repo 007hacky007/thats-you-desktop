@@ -86,3 +86,19 @@ class ConfigTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConfigEnvTest(unittest.TestCase):
+    def test_iwyk_config_env_points_at_another_file(self):
+        import os
+        from unittest import mock
+        from pipeline import web_common
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            data = make_inputs(root)
+            data["work_dir"] = str(root / "w")
+            p = root / "builder-config.json"
+            p.write_text(json.dumps(data))
+            with mock.patch.dict(os.environ, {"IWYK_CONFIG": str(p)}):
+                self.assertEqual(config.load().work_dir, root / "w")
+                self.assertEqual(web_common.load_local()["work_dir"], str(root / "w"))

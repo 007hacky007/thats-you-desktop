@@ -58,7 +58,10 @@ class BuildError(Exception):
 
 def work_dir(config_path: Path | None = None) -> Path:
     """work_dir from config/local.json (read directly; the dump paths need not exist)."""
-    path = Path(config_path) if config_path else CONFIG_PATH
+    if not config_path:
+        from pipeline import config
+        config_path = config.config_path()
+    path = Path(config_path)
     data = {}
     if path.is_file():
         try:
