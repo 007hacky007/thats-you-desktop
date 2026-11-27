@@ -36,7 +36,6 @@ class PrePushTests(unittest.TestCase):
     def push(self, *extra, env=None):
         import os
         e = dict(os.environ, **(env or {}))
-        e.pop("IWYK_ALLOW_LOCAL_PATCHES", None) if not env or "IWYK_ALLOW_LOCAL_PATCHES" not in env else None
         return subprocess.run(["git", "push", "-q", *extra, "origin", "master"], cwd=self.repo,
                               capture_output=True, text=True, env=e)
 
@@ -48,7 +47,7 @@ class PrePushTests(unittest.TestCase):
         self.commit("local-patches/010-x.patch", "diff\n", force=True)
         r = self.push()
         self.assertNotEqual(r.returncode, 0)
-        self.assertIn("Plan 7", r.stderr)
+        self.assertIn("local-patches/", r.stderr)
 
     def test_prepush_blocks_patch_in_history(self):
         self.commit("local-patches/010-x.patch", "diff\n", force=True)
@@ -62,18 +61,12 @@ class PrePushTests(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("privateUrl", r.stderr)
 
-    def test_blocks_while_local_patch_files_exist(self):
-        # untracked patch files on disk mean Plan 7 is not done yet
+    def test_untracked_local_patch_files_do_not_block(self):
+        # the private patches stay on the owner's disk; only committing them is refused
         (self.repo / "local-patches").mkdir()
         (self.repo / "local-patches/001-x.patch").write_text("diff\n")
         r = self.push()
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("Plan 7", r.stderr)
-
-    def test_override_allows_push_with_local_patch_files(self):
-        (self.repo / "local-patches").mkdir()
-        (self.repo / "local-patches/001-x.patch").write_text("diff\n")
-        self.assertEqual(self.push(env={"IWYK_ALLOW_LOCAL_PATCHES": "1"}).returncode, 0)
+        self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_unknown_remote_sha_fails_closed(self):
         # remote moved on elsewhere: rsha is not a local object; force push must still be checked

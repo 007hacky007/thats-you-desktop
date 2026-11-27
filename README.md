@@ -125,3 +125,5 @@ How the build works, all options, tests and the layout of the code: [docs/DEVELO
 ## Legal
 
 This project is not affiliated with or endorsed by Sony Interactive Entertainment or Supermassive Games. "That's You!" and PlayLink are their trademarks. The screenshots show the game running with this project. Use it only with copies of the game and app that you own.
+
+The code in this repository is released under the [MIT licence](LICENSE). It covers only the scripts and the port's own code, not the game.

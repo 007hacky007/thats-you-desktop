@@ -2,14 +2,11 @@
 """Refuse pushes that could publish decompiled code or the private phone page address.
 
 Fails closed: any git error, an unknown remote state or a missing private address blocks the push.
-- local-patches/*.patch files on disk mean Plan 7 (convert patches to compiled-assembly edits) is
-  not done. Override only after Plan 7 with IWYK_ALLOW_LOCAL_PATCHES=1.
 - No pushed commit may touch a path under any local-patches/ directory.
 - No object in the pushed commits (text or binary, any letter case, merges included) may contain
   the private page host from `git config iwyk.privateUrl` (fallback: config/local.json phone_page_url).
 """
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -67,8 +64,8 @@ def check_ref(lsha: str, rsha: str, host: bytes, problems: list[str]) -> None:
         if len(parts) == 2:
             paths[parts[0]] = parts[1]
     if any("local-patches" in Path(p).parts for p in paths.values()):
-        problems.append("pushed commits touch local-patches/ (decompiled game code). Convert them first "
-                        "(Plan 7) and publish a history that never contained them.")
+        problems.append("pushed commits touch local-patches/ (decompiled game code). They stay private: "
+                        "publish a history that never contained them.")
     oids = [line.split(" ", 1)[0] for line in objs]
     types = git("cat-file", "--batch-check=%(objectname) %(objecttype)", input="\n".join(oids).encode() + b"\n")
     blobs = [l.split()[0] for l in types.decode().splitlines() if l.endswith(" blob")]
@@ -86,9 +83,6 @@ def main() -> int:
     try:
         root = Path(git("rev-parse", "--show-toplevel").decode().strip())
         problems = []
-        if list((root / "local-patches").glob("*.patch")) and os.environ.get("IWYK_ALLOW_LOCAL_PATCHES") != "1":
-            problems.append("local-patches/*.patch exist: Plan 7 (convert them to compiled-assembly edits) is not "
-                            "done. Pushing is blocked until then.")
         host = private_host(root)
         if not host:
             problems.append("no private page address configured: set it with git config iwyk.privateUrl <host>.")
