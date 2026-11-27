@@ -74,7 +74,8 @@ class AccountTest(unittest.TestCase):
 
             def run(argv, **kw):
                 calls.append(argv)
-                prefix = Path(argv[argv.index("--prefix") + 1])
+                prefix = Path(kw["cwd"])
+                self.assertTrue((prefix / "package-lock.json").is_file(), "installs from the committed lockfile")
                 js = prefix / "node_modules" / "wrangler" / "bin" / "wrangler.js"
                 js.parent.mkdir(parents=True)
                 js.write_text("")
@@ -83,7 +84,7 @@ class AccountTest(unittest.TestCase):
             argv = cf_account.ensure_wrangler(d, ensure=lambda name, w: node_dir, run=run, plat="macos-arm64")
             self.assertEqual(argv[0], str(node_dir / "bin" / "node"))
             self.assertTrue(argv[1].endswith("wrangler.js"))
-            self.assertIn(f"wrangler@{cf_account.WRANGLER_VERSION}", calls[0])
+            self.assertEqual(calls[0][2:], ["ci", "--ignore-scripts", "--no-audit", "--no-fund"])
             cf_account.ensure_wrangler(d, ensure=lambda name, w: node_dir, run=run, plat="macos-arm64")
             self.assertEqual(len(calls), 1)
 

@@ -14,13 +14,15 @@ import hashlib
 import json
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 from pipeline import tools
 
-WRANGLER_VERSION = "4.168.0"
+WRANGLER_VERSION = "4.168.0"  # must match pipeline/wrangler/package.json
+LOCK_DIR = Path(__file__).with_name("wrangler")
 COMPATIBILITY_DATE = "2026-11-01"
 ADDRESS_RE = re.compile(r"https://[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev")
 
@@ -47,9 +49,13 @@ def ensure_wrangler(work_dir: Path, ensure=tools.ensure, run=subprocess.run, pla
     prefix = Path(work_dir) / "tools" / f"wrangler-{WRANGLER_VERSION}"
     js = prefix / "node_modules" / "wrangler" / "bin" / "wrangler.js"
     if not js.is_file():
+        # The whole dependency tree is locked with integrity hashes (pipeline/wrangler), and no
+        # package install scripts run.
         prefix.mkdir(parents=True, exist_ok=True)
-        r = run([str(node), str(npm), "install", "--no-audit", "--no-fund", "--prefix", str(prefix),
-                 f"wrangler@{WRANGLER_VERSION}"], capture_output=True, text=True)
+        for f in ("package.json", "package-lock.json"):
+            shutil.copyfile(LOCK_DIR / f, prefix / f)
+        r = run([str(node), str(npm), "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+                cwd=str(prefix), capture_output=True, text=True)
         if r.returncode != 0 or not js.is_file():
             raise AccountError(f"installing wrangler failed: {(r.stderr or r.stdout or '')[-800:]}")
     return [str(node), str(js)]

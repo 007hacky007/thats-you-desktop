@@ -1,0 +1,8 @@
+{
+  "name": "iwyk-wrangler",
+  "private": true,
+  "description": "Pinned wrangler for the builder's Cloudflare account option (installed with npm ci --ignore-scripts)",
+  "dependencies": {
+    "wrangler": "4.168.0"
+  }
+}
