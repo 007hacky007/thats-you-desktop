@@ -63,7 +63,14 @@ jobs:
       - name: Source archive
         if: matrix.platform == 'macos-arm64'
         run: git archive --format=tar.gz --prefix=thats-you-desktop/ -o work/package/thats-you-desktop-source.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: |
+            work/package/${{ matrix.artifact }}
+            work/package/${{ matrix.artifact }}.sha256
       - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
         with:
           draft: true
           files: |
