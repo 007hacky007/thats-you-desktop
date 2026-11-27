@@ -87,6 +87,13 @@ int32_t iwyk_close(int32_t session);
 int32_t iwyk_buffered(int32_t session);                           /* bytes queued, not yet on the wire */
 int32_t iwyk_last_error(uint8_t* out, int32_t cap);               /* message of the last failing call; returns length */
 
+/* Phone page host: serves the page folder on 127.0.0.1 and publishes it through a Cloudflare
+ * quick tunnel (cloudflared tunnel --url). Independent of iwyk_start. */
+int32_t iwyk_pagehost_start(const char* page_dir, const char* cloudflared_path);
+int32_t iwyk_pagehost_state(uint8_t* url, int32_t url_cap, uint8_t* detail, int32_t detail_cap);
+                                                                  /* 0 starting, 1 ready (url), 2 failed (detail, retrying) */
+int32_t iwyk_pagehost_stop(void);                                 /* idempotent */
+
 #ifdef __cplusplus
 }
 #endif

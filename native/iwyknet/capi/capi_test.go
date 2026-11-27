@@ -72,7 +72,7 @@ func TestHeaderFunctionsAreExported(t *testing.T) {
 	for _, m := range ere.FindAllStringSubmatch(string(src), -1) {
 		ef = append(ef, m[1])
 	}
-	if len(hf) != 14 || !reflect.DeepEqual(hf, ef) {
+	if len(hf) != 17 || !reflect.DeepEqual(hf, ef) {
 		t.Fatalf("header %v\nexports %v", hf, ef)
 	}
 	if cEventSize() != 20 {
@@ -286,5 +286,42 @@ func TestStartedLifecycle(t *testing.T) {
 	// Restart on a fresh port works and keeps the certificate.
 	if rc := apiStart(0, "127.0.0.1", cert); rc != server.OK {
 		t.Fatalf("restart %d", rc)
+	}
+}
+
+func TestPageHost(t *testing.T) {
+	apiPageHostStop()
+	url := make([]byte, 200)
+	detail := make([]byte, 300)
+	if rc := apiPageHostState(url, detail); rc != server.ENotStarted {
+		t.Fatalf("state before start = %d", rc)
+	}
+	if rc := apiPageHostStart(filepath.Join(t.TempDir(), "nope"), "cloudflared"); rc != server.EArg {
+		t.Fatalf("start with missing page = %d", rc)
+	}
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "index.html"), []byte("hi"), 0o644)
+	if rc := apiPageHostStart(dir, filepath.Join(dir, "no-cloudflared")); rc != 0 {
+		t.Fatalf("start = %d", rc)
+	}
+	if rc := apiPageHostStart(dir, "x"); rc != server.EAlreadyStarted {
+		t.Fatalf("second start = %d", rc)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	rc := int32(0)
+	for time.Now().Before(deadline) {
+		if rc = apiPageHostState(url, detail); rc == 2 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if rc != 2 || detail[0] == 0 {
+		t.Fatalf("state = %d, detail %q", rc, detail)
+	}
+	if rc := apiPageHostStop(); rc != 0 {
+		t.Fatalf("stop = %d", rc)
+	}
+	if rc := apiPageHostState(url, detail); rc != server.ENotStarted {
+		t.Fatalf("state after stop = %d", rc)
 	}
 }

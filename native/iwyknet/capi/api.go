@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"sync"
 
+	"iwyknet/pagehost"
 	"iwyknet/server"
 )
 
@@ -229,6 +230,61 @@ func apiLastError(out []byte) int32 {
 		return server.ESmallBuf
 	}
 	return writeOut(msg, out)
+}
+
+var (
+	pmu   sync.Mutex
+	phost *pagehost.Host
+)
+
+// apiPageHostStart serves the phone page in dir and opens a quick tunnel with cloudflared.
+func apiPageHostStart(dir, cloudflared string) int32 {
+	pmu.Lock()
+	defer pmu.Unlock()
+	if phost != nil {
+		return fail(server.EAlreadyStarted, fmt.Errorf("page host already started"))
+	}
+	if dir == "" || cloudflared == "" {
+		return errArg("page folder and cloudflared path are required")
+	}
+	h, err := pagehost.Start(pagehost.Config{Dir: dir, Cloudflared: cloudflared})
+	if err != nil {
+		return fail(server.EArg, err)
+	}
+	phost = h
+	return 0
+}
+
+// apiPageHostState: 0 starting, 1 ready (url filled), 2 failed (detail filled).
+func apiPageHostState(url, detail []byte) int32 {
+	pmu.Lock()
+	h := phost
+	pmu.Unlock()
+	if h == nil {
+		return fail(server.ENotStarted, fmt.Errorf("page host not started"))
+	}
+	st, u, d := h.State()
+	if rc := writeOut(u, url); rc < 0 {
+		return rc
+	}
+	if len(d) > len(detail) {
+		d = d[:len(detail)]
+	}
+	if rc := writeOut(d, detail); rc < 0 {
+		return rc
+	}
+	return int32(st)
+}
+
+func apiPageHostStop() int32 {
+	pmu.Lock()
+	h := phost
+	phost = nil
+	pmu.Unlock()
+	if h != nil {
+		h.Stop()
+	}
+	return 0
 }
 
 func main() {}

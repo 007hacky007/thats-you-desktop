@@ -168,3 +168,21 @@ func iwyk_last_error(out *C.uint8_t, n C.int32_t) C.int32_t {
 	}
 	return C.int32_t(apiLastError(b))
 }
+
+//export iwyk_pagehost_start
+func iwyk_pagehost_start(dir *C.char, cloudflared *C.char) C.int32_t {
+	return C.int32_t(apiPageHostStart(goStr(dir), goStr(cloudflared)))
+}
+
+//export iwyk_pagehost_state
+func iwyk_pagehost_state(url *C.uint8_t, urlLen C.int32_t, detail *C.uint8_t, detailLen C.int32_t) C.int32_t {
+	u, ok1 := outBuf(url, urlLen)
+	d, ok2 := outBuf(detail, detailLen)
+	if !ok1 || !ok2 {
+		return C.int32_t(errArg("bad output buffer"))
+	}
+	return C.int32_t(apiPageHostState(u, d))
+}
+
+//export iwyk_pagehost_stop
+func iwyk_pagehost_stop() C.int32_t { return C.int32_t(apiPageHostStop()) }
