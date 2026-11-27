@@ -101,6 +101,9 @@ namespace PortNet
             }
         }
 
+        // Tunnel mode: what the page host reports while there is no address yet (null = starting).
+        public string PageStatus;
+
         // Human readable reason why phones cannot join right now; null when fine.
         public string Problem
         {
@@ -112,6 +115,8 @@ namespace PortNet
                     return "network not started";
                 if (m_joinUrl == null)
                 {
+                    if (m_config.PhonePageUrl == null && m_config.PageHost == NetConfig.PageHostTunnel)
+                        return PageStatus == null ? "starting the phone page..." : "phone page: " + PageStatus;
                     if (m_config.PhonePageUrl == null)
                         return "phone page address not set: add " + NetConfig.KeyPageUrl + " to " + (m_config.GameConfigPath ?? NetConfig.FileName);
                     return "phone page address is not a valid http(s) URL";

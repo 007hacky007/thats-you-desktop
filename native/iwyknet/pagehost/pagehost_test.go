@@ -5,7 +5,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -247,5 +249,49 @@ func TestReadyOnlyAfterVerify(t *testing.T) {
 	defer mu.Unlock()
 	if calls != 3 {
 		t.Errorf("verify called %d times before ready", calls)
+	}
+}
+
+func TestStaleTunnelFromCrashIsEnded(t *testing.T) {
+	pid := filepath.Join(t.TempDir(), "cloudflared.pid")
+	stale := exec.Command(self(t))
+	stale.Env = append(os.Environ(), "FAKE_CF=ok")
+	if err := stale.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan struct{})
+	go func() { stale.Wait(); close(exited) }()
+	os.WriteFile(pid, []byte(strconv.Itoa(stale.Process.Pid)), 0o644)
+	h, err := Start(Config{Dir: site(t), Cloudflared: self(t), Env: []string{"FAKE_CF=ok"}, Verify: okVerify, PidFile: pid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		stale.Process.Kill()
+		t.Fatal("stale tunnel from an earlier run still running")
+	}
+	waitState(t, h, Ready)
+	b, _ := os.ReadFile(pid)
+	if strings.TrimSpace(string(b)) == strconv.Itoa(stale.Process.Pid) || len(b) == 0 {
+		t.Errorf("pid file %q not updated", b)
+	}
+	h.Stop()
+	if _, err := os.Stat(pid); !os.IsNotExist(err) {
+		t.Error("pid file left after Stop")
+	}
+}
+
+func TestPidFileOfOtherProgramIsNotKilled(t *testing.T) {
+	pid := filepath.Join(t.TempDir(), "cloudflared.pid")
+	os.WriteFile(pid, []byte(strconv.Itoa(os.Getppid())), 0o644) // the go tool, not a tunnel
+	h, err := Start(Config{Dir: site(t), Cloudflared: self(t), Env: []string{"FAKE_CF=ok"}, Verify: okVerify, PidFile: pid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Stop()
+	if p, err := os.FindProcess(os.Getppid()); err != nil || p == nil {
+		t.Fatal("parent gone")
 	}
 }

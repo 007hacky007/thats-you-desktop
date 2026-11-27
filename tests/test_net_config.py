@@ -32,6 +32,15 @@ class WriteTests(unittest.TestCase):
         self.assertTrue(text.endswith("}\n"))
         self.assertTrue(text.isascii())
 
+    def test_tunnel_mode_needs_no_url(self):
+        p = net_config.write(self.root / "t", None, page_host="tunnel", repo=self.repo)
+        d = json.loads(p.read_text())
+        self.assertEqual((d["page_host"], d["phone_page_url"]), ("tunnel", None))
+        with self.assertRaises(ValueError):
+            net_config.write(self.root / "t", None, page_host="url", repo=self.repo)
+        with self.assertRaises(ValueError):
+            net_config.write(self.root / "t", URL, page_host="magic", repo=self.repo)
+
     def test_defaults(self):
         p = net_config.write(self.root / "b", "http://127.0.0.1:8080/", repo=self.repo)
         d = json.loads(p.read_text())

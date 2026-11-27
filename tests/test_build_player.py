@@ -1,3 +1,4 @@
+import os
 import subprocess
 import tempfile
 import unittest
@@ -163,3 +164,26 @@ class TargetArgvTest(unittest.TestCase):
     def test_mac_is_default(self):
         from pipeline.build_player import build_argv
         self.assertIn("PortBuild.BuildMac", build_argv(Path("/u"), Path("/p"), Path("/l")))
+
+
+class PageHostInstallTest(unittest.TestCase):
+    def test_copies_page_and_cloudflared_next_to_the_game(self):
+        import tempfile
+        from pipeline.build_player import install_page_host
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            web = d / "web-dist"
+            (web / "js").mkdir(parents=True)
+            (web / "index.html").write_text("hi")
+            (web / "js" / "a.js").write_text("x")
+            cf = d / "cf" / "cloudflared"
+            cf.parent.mkdir()
+            cf.write_text("bin")
+            out = d / "build"
+            (out / "PhonePage" / "stale.txt").parent.mkdir(parents=True)
+            (out / "PhonePage" / "stale.txt").write_text("old")
+            install_page_host(out, web, cf, log=lambda m: None)
+            self.assertEqual((out / "PhonePage" / "js" / "a.js").read_text(), "x")
+            self.assertFalse((out / "PhonePage" / "stale.txt").exists())
+            self.assertEqual((out / "cloudflared").read_text(), "bin")
+            self.assertTrue(os.access(out / "cloudflared", os.X_OK))

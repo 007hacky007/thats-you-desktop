@@ -165,6 +165,8 @@ def main(argv=None) -> int:
     ap.add_argument("--keys", default="8:Return,20:Return,30:Return",
                     help="TV key script for the language select and splash (run_player --keys format)")
     ap.add_argument("--headful", action="store_true")
+    ap.add_argument("--tunnel", action="store_true",
+                    help="use the page address the game itself publishes (tunnel mode build)")
     ap.add_argument("--page-url", default="", metavar="URL",
                     help="phones open this page address (for example a tunnel) instead of the local test server")
     ap.add_argument("--seed", type=int, default=1)
@@ -187,14 +189,17 @@ def main(argv=None) -> int:
     if a.page_url:
         base = a.page_url
     join_file = run_dir / "join-url.txt"
-    os.environ["IWYK_PAGE_URL"] = base  # the player inherits it; local test only
+    if not a.tunnel:
+        os.environ["IWYK_PAGE_URL"] = base  # the player inherits it; local test only
     exe = run_player.find_executable(c.work_dir / "builds" / "mac" / "ThatsYou.app")
     seconds = a.minutes * 60 + 60
     result: dict = {}
+    stop_player = threading.Event()
 
     def player():
         result["rc"] = run_player.run(exe, run_dir, seconds, a.keys, shot_interval=15.0,
-                                      extra=["-portJoinUrlFile", str(join_file)] + a.player_args.split(), audio={"mute": True})
+                                      extra=["-portJoinUrlFile", str(join_file)] + a.player_args.split(), audio={"mute": True},
+                                      stop=stop_player)
 
     t = threading.Thread(target=player, daemon=True)
     t.start()
@@ -211,6 +216,7 @@ def main(argv=None) -> int:
         time.sleep(1)
     if not join_file.is_file():
         print("game never published a join URL", file=sys.stderr)
+        stop_player.set()
         server.shutdown()
         return 1
     url = join_file.read_text().strip()
@@ -252,6 +258,7 @@ def main(argv=None) -> int:
                     p.since = time.monotonic()
             time.sleep(0.5)
     finally:
+        stop_player.set()  # also on errors: never leave the game running
         if droid:
             droid.close()
         browser.close()

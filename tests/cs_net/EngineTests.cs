@@ -674,6 +674,19 @@ namespace PortNet.Tests
         }
 
         [PaTest]
+        public static void TunnelProblemTexts()
+        {
+            var r = new Rig(false);
+            r.E.Start(new NetConfig { PageHost = NetConfig.PageHostTunnel }, "/c.pem");
+            PaAssert.Equal("starting the phone page...", r.E.Problem);
+            r.E.PageStatus = "no internet";
+            PaAssert.Equal("phone page: no internet", r.E.Problem);
+            r.E.SetPageUrl("https://a-b.trycloudflare.com/");
+            PaAssert.Null(r.E.Problem);
+            PaAssert.True(r.E.JoinUrl.StartsWith("https://a-b.trycloudflare.com/#", StringComparison.Ordinal), r.E.JoinUrl);
+        }
+
+        [PaTest]
         public static void ProblemTexts()
         {
             var r = new Rig(false);

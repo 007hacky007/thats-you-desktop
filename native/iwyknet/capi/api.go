@@ -6,6 +6,8 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"sync"
@@ -247,7 +249,11 @@ func apiPageHostStart(dir, cloudflared string) int32 {
 	if dir == "" || cloudflared == "" {
 		return errArg("page folder and cloudflared path are required")
 	}
-	h, err := pagehost.Start(pagehost.Config{Dir: dir, Cloudflared: cloudflared})
+	pid := ""
+	if cache, err := os.UserCacheDir(); err == nil {
+		pid = filepath.Join(cache, "iwyknet", "cloudflared.pid")
+	}
+	h, err := pagehost.Start(pagehost.Config{Dir: dir, Cloudflared: cloudflared, PidFile: pid})
 	if err != nil {
 		return fail(server.EArg, err)
 	}

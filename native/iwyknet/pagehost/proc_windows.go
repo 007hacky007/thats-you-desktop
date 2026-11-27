@@ -86,6 +86,9 @@ func attachChild(cmd *exec.Cmd) {
 	procAssignProcessToJobObject.Call(uintptr(j), uintptr(ph))
 }
 
+// processPath is not needed on Windows: the job object already ends cloudflared with the game.
+func processPath(pid int) string { return "" }
+
 func killTree(cmd *exec.Cmd) {
 	if cmd.Process != nil {
 		cmd.Process.Kill()

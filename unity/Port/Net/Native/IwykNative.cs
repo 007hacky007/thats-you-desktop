@@ -103,6 +103,16 @@ namespace PortNet
         [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
         public static extern int iwyk_last_error([Out] byte[] outBuf, int cap);
 
+        // Phone page host (quick tunnel): state 0 starting, 1 ready, 2 failed (retrying).
+        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int iwyk_pagehost_start(byte[] pageDir, byte[] cloudflaredPath);
+
+        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int iwyk_pagehost_state([Out] byte[] url, int urlCap, [Out] byte[] detail, int detailCap);
+
+        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int iwyk_pagehost_stop();
+
         // NUL-terminated UTF-8, or null for a null string.
         public static byte[] Utf8z(string s)
         {

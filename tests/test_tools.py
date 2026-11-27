@@ -74,6 +74,11 @@ class ToolsTests(unittest.TestCase):
         d = tools.ensure("t", self.work, spec=self.spec("tool.tar.xz"))
         self.assertTrue((d / "Tool/run").is_file())
 
+    def test_plain_executable_is_kept_as_is(self):
+        (self.serve / "tool.exe").write_bytes(b"MZ fake")
+        d = tools.ensure("t", self.work, spec=self.spec("tool.exe"))
+        self.assertEqual((d / "tool.exe").read_bytes(), b"MZ fake")
+
     def test_checksum_mismatch_raises_and_deletes(self):
         with self.assertRaises(ChecksumError):
             tools.ensure("t", self.work, spec=self.spec("tool.zip", sha="0" * 64))

@@ -16,11 +16,15 @@ namespace PortNet
         public const string KeyUdpPort = "udp_port";
         public const string KeyLanIp = "lan_ip";
         public const string KeyLogLevel = "log_level";
+        public const string KeyPageHost = "page_host";
+        public const string PageHostUrl = "url";        // phone_page_url points at a hosted page
+        public const string PageHostTunnel = "tunnel";  // the game serves the page through a quick tunnel
 
         public const string EnvPageUrl = "IWYK_PAGE_URL";
         public const string EnvUdpPort = "IWYK_UDP_PORT";
         public const string EnvLanIp = "IWYK_LAN_IP";
         public const string EnvLogLevel = "IWYK_LOG_LEVEL";
+        public const string EnvPageHost = "IWYK_PAGE_HOST";
 
         static readonly string[] LevelNames = { "debug", "info", "warn", "error", "off" };
 
@@ -28,6 +32,7 @@ namespace PortNet
         public int UdpPort = NetLimits.DefaultUdpPort;  // 0 = any free port
         public string LanIp = "";                       // "" = automatic
         public int LogLevel = NetCodes.LogInfo;
+        public string PageHost = PageHostUrl;
 
         // Where the files live (informational: used in problem texts).
         public string GameConfigPath;
@@ -85,6 +90,12 @@ namespace PortNet
                         else
                             warnings?.Add(source + ": " + KeyLanIp + " is not a string, ignored");
                         break;
+                    case KeyPageHost:
+                        if (NetJson.TryGetString(b, v, out string host))
+                            SetPageHost(host, source + " " + KeyPageHost, warnings);
+                        else
+                            warnings?.Add(source + ": " + KeyPageHost + " is not a string, ignored");
+                        break;
                     case KeyLogLevel:
                         if (NetJson.TryGetString(b, v, out string lvl))
                             SetLevel(lvl, source + " " + KeyLogLevel, warnings);
@@ -116,6 +127,17 @@ namespace PortNet
             s = getEnv(EnvLogLevel);
             if (!string.IsNullOrEmpty(s))
                 SetLevel(s, EnvLogLevel, warnings);
+            s = getEnv(EnvPageHost);
+            if (!string.IsNullOrEmpty(s))
+                SetPageHost(s.Trim(), EnvPageHost, warnings);
+        }
+
+        void SetPageHost(string host, string what, ICollection<string> warnings)
+        {
+            if (host == PageHostUrl || host == PageHostTunnel)
+                PageHost = host;
+            else
+                warnings?.Add(what + ": must be \"url\" or \"tunnel\", ignored");
         }
 
         void SetUrl(string url, string what, ICollection<string> warnings)

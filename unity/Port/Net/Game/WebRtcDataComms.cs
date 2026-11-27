@@ -71,6 +71,7 @@ namespace PortNet
         public void Update(bool updateHeartbeats)
         {
             m_engine.Update(Time.deltaTime, Time.realtimeSinceStartup, updateHeartbeats);
+            PortPageHost.Poll(m_engine);
             PortJoinOverlay.Ensure(); // scene loads may destroy it
         }
 

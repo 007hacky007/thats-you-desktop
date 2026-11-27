@@ -104,7 +104,7 @@ namespace PortNet
             {
                 string why = PortNetJoin.Problem ?? "starting network...";
                 GUI.Label(new Rect(box.x + pad, box.y + pad, qr, ph - 2 * pad),
-                    "Phones cannot join yet:\n" + why + "\n\nSet phone_page_url in iwyk-net.json next to the game.", m_small);
+                    "Phones cannot join yet:\n" + why + (PortNetJoin.UsesTunnel ? "" : "\n\nSet phone_page_url in iwyk-net.json next to the game."), m_small);
             }
         }
     }

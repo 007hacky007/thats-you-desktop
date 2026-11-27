@@ -691,7 +691,7 @@ def run(exe: Path, run_dir: Path, seconds: float, keys: str | None, fresh_save: 
         no_image_effects: bool = False, fx_only: str | None = None, fx_keep: str | None = None,
         shot_interval: float | None = None, key_shots: bool = False, caffeinate: bool = True,
         warnings: list[str] | None = None, extra: list[str] | None = None,
-        audio: dict | None = None) -> int | None:
+        audio: dict | None = None, stop=None) -> int | None:
     (run_dir / "shots").mkdir(parents=True, exist_ok=True)
     save_dir = None
     if fresh_save:
@@ -716,7 +716,7 @@ def run(exe: Path, run_dir: Path, seconds: float, keys: str | None, fresh_save: 
         watch = StallWatch(run_dir / "shots", interval=shot_interval or 2.0)
         start = time.monotonic()
         deadline = start + seconds
-        while time.monotonic() < deadline and proc.poll() is None:
+        while time.monotonic() < deadline and proc.poll() is None and not (stop is not None and stop.is_set()):
             time.sleep(0.5)
             now = time.monotonic()
             msg = watch.check(now, now - start)

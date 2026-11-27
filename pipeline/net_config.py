@@ -61,14 +61,28 @@ def check_out_dir(out_dir: Path, repo: Path = REPO_ROOT) -> Path:
     return out
 
 
-def render(page_url: str, udp_port: int = DEFAULT_UDP_PORT, lan_ip: str = "") -> str:
-    data = {"phone_page_url": normalize_url(page_url), "udp_port": check_port(udp_port),
+PAGE_HOSTS = ("url", "tunnel")
+
+
+def render(page_url: str | None, udp_port: int = DEFAULT_UDP_PORT, lan_ip: str = "", page_host: str = "url") -> str:
+    """page_host "url": phones open page_url. "tunnel": the game serves PhonePage/ itself through a
+    quick tunnel; page_url may then be None."""
+    if page_host not in PAGE_HOSTS:
+        raise ValueError(f"page_host must be one of {PAGE_HOSTS}, got {page_host!r}")
+    if page_host == "url" or page_url:
+        url = normalize_url(page_url) if page_url is not None else normalize_url("")
+    else:
+        url = None
+    data = {"phone_page_url": url, "udp_port": check_port(udp_port),
             "lan_ip": check_lan_ip(lan_ip), "log_level": "info"}
+    if page_host != "url":
+        data["page_host"] = page_host
     return json.dumps(data, indent=2, ensure_ascii=True) + "\n"
 
 
-def write(out_dir, page_url: str, udp_port: int = DEFAULT_UDP_PORT, lan_ip: str = "", *, repo: Path = REPO_ROOT) -> Path:
-    text = render(page_url, udp_port, lan_ip)
+def write(out_dir, page_url: str | None, udp_port: int = DEFAULT_UDP_PORT, lan_ip: str = "", *,
+          page_host: str = "url", repo: Path = REPO_ROOT) -> Path:
+    text = render(page_url, udp_port, lan_ip, page_host)
     check_out_dir(out_dir, repo)
     out = Path(out_dir).expanduser()
     out.mkdir(parents=True, exist_ok=True)

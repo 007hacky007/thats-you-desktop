@@ -18,7 +18,9 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -45,6 +47,29 @@ type Config struct {
 	Verify      func(url string) error
 	VerifyEvery time.Duration // pause between Verify attempts; 0 = 2s
 	VerifyFor   time.Duration // give up after; 0 = 90s
+	// PidFile records the running cloudflared. If the game was killed or crashed, its tunnel
+	// may still run; the next Start ends it (only if that process is a cloudflared). "" = none.
+	PidFile string
+}
+
+// endStale ends a cloudflared left behind by an earlier run, named in the pid file.
+func endStale(pidFile, cloudflared string) {
+	b, err := os.ReadFile(pidFile)
+	if err != nil {
+		return
+	}
+	os.Remove(pidFile)
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil || pid <= 1 || pid == os.Getpid() {
+		return
+	}
+	exe := processPath(pid)
+	if exe == "" || filepath.Base(exe) != filepath.Base(cloudflared) {
+		return
+	}
+	if p, err := os.FindProcess(pid); err == nil {
+		p.Kill()
+	}
 }
 
 // VerifyPublic resolves the tunnel's host name over DNS-over-HTTPS (so the local resolver never
@@ -162,6 +187,9 @@ func Start(cfg Config) (*Host, error) {
 	if cfg.VerifyFor == 0 {
 		cfg.VerifyFor = 90 * time.Second
 	}
+	if cfg.PidFile != "" {
+		endStale(cfg.PidFile, cfg.Cloudflared)
+	}
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return nil, fmt.Errorf("cannot serve the phone page: %w", err)
@@ -211,6 +239,9 @@ func (h *Host) Stop() {
 	h.mu.Unlock()
 	<-h.done
 	h.srv.Close()
+	if h.cfg.PidFile != "" {
+		os.Remove(h.cfg.PidFile)
+	}
 }
 
 func (h *Host) handler() http.Handler {
@@ -300,6 +331,10 @@ func (h *Host) runOnce() error {
 	if err := cmd.Start(); err != nil {
 		pw.Close()
 		return fmt.Errorf("cannot start cloudflared: %w", err)
+	}
+	if h.cfg.PidFile != "" {
+		os.MkdirAll(filepath.Dir(h.cfg.PidFile), 0o755)
+		os.WriteFile(h.cfg.PidFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0o644)
 	}
 	h.mu.Lock()
 	h.child, h.running = cmd, true

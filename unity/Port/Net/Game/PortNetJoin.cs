@@ -16,6 +16,7 @@ namespace PortNet
         public static bool Running => Engine != null && Engine.Running;
         public static string JoinUrl => Engine?.JoinUrl;
         public static string Problem => Engine == null ? "network not started" : Engine.Problem;
+        public static bool UsesTunnel => Engine != null && Engine.Config.PageHost == NetConfig.PageHostTunnel;
         public static string Endpoint => Engine?.Endpoint;
         public static int SessionCount => Engine == null ? 0 : Engine.SessionCount;
 

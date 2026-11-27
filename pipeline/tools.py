@@ -40,7 +40,16 @@ def _safe_target(dest: Path, name: str) -> Path:
     return target
 
 
+ARCHIVES = (".zip", ".tar", ".tar.gz", ".tgz", ".tar.xz", ".tar.bz2")
+
+
 def _extract(archive: Path, dest: Path) -> None:
+    if not archive.name.endswith(ARCHIVES):  # a plain executable (for example cloudflared.exe)
+        dest.mkdir(parents=True, exist_ok=True)
+        target = dest / archive.name
+        shutil.copyfile(archive, target)
+        target.chmod(0o755)
+        return
     if archive.name.endswith(".zip"):
         with zipfile.ZipFile(archive) as z:
             for info in z.infolist():

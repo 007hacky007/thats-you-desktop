@@ -136,10 +136,42 @@ def install_native(work_dir: Path, project: Path, log=print) -> None:
     build_native.install(out, project)
 
 
-def write_net_config(c, out_dir: Path, log=print) -> None:
-    """iwyk-net.json next to the app, with the page address from config/local.json."""
-    from pipeline import net_config
+def install_page_host(out_dir: Path, web_dist: Path, cloudflared: Path, log=print) -> None:
+    """Tunnel mode: the phone page (PhonePage/) and cloudflared next to the game."""
+    import shutil
 
+    if not (Path(web_dist) / "index.html").is_file():
+        raise FileNotFoundError(f"no phone page at {web_dist}: run python3 -m pipeline.build_web first")
+    out_dir = Path(out_dir)
+    page = out_dir / "PhonePage"
+    if page.exists():
+        shutil.rmtree(page)
+    shutil.copytree(web_dist, page)
+    dst = out_dir / Path(cloudflared).name.replace("cloudflared-windows-amd64.exe", "cloudflared.exe")
+    shutil.copyfile(cloudflared, dst)
+    dst.chmod(0o755)
+    log(f"phone page and {dst.name} installed next to the game (tunnel mode)")
+
+
+def cloudflared_binary(work_dir: Path) -> Path:
+    from pipeline import tools
+
+    d = tools.ensure("cloudflared", work_dir)
+    for name in ("cloudflared", "cloudflared.exe", "cloudflared-windows-amd64.exe"):
+        if (d / name).is_file():
+            return d / name
+    raise FileNotFoundError(f"cloudflared not found in {d}")
+
+
+def write_net_config(c, out_dir: Path, log=print) -> None:
+    """iwyk-net.json next to the app: the page address, or tunnel mode with the page beside it."""
+    from pipeline import net_config, web_common
+
+    if getattr(c, "page_host", "url") == "tunnel":
+        net_config.write(out_dir, None, page_host="tunnel")
+        install_page_host(out_dir, web_common.web_dist({"work_dir": str(c.work_dir)}), cloudflared_binary(c.work_dir), log)
+        log(f"wrote {out_dir / net_config.FILE_NAME} (tunnel mode)")
+        return
     if not c.phone_page_url:
         log("no phone_page_url in config/local.json: the game will show how to set it")
         return

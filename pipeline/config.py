@@ -24,6 +24,7 @@ class Config:
     work_dir: Path
     unity_editor: Path | None
     phone_page_url: str | None
+    page_host: str = "url"  # "tunnel": the game hosts the page itself (default without phone_page_url)
 
 
 def _required_dir(data: dict, key: str) -> Path:
@@ -55,7 +56,11 @@ def load(path: Path | None = None) -> Config:
 
     work = Path(data["work_dir"]).expanduser() if data.get("work_dir") else REPO_ROOT / "work"
     unity = Path(data["unity_editor"]).expanduser() if data.get("unity_editor") else None
-    return Config(base, patch, apk, work, unity, data.get("phone_page_url") or None)
+    url = data.get("phone_page_url") or None
+    host = data.get("page_host") or ("url" if url else "tunnel")
+    if host not in ("url", "tunnel"):
+        raise ConfigError("page_host", f"must be \"url\" or \"tunnel\", got {host!r}")
+    return Config(base, patch, apk, work, unity, url, host)
 
 
 def editor(c: Config) -> Path | None:

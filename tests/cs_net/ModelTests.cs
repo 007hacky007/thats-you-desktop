@@ -202,6 +202,23 @@ namespace PortNet.Tests
         }
 
         [PaTest]
+        public static void PageHostSetting()
+        {
+            var w = new List<string>();
+            PaAssert.Equal(NetConfig.PageHostUrl, NetConfig.Load(null, null, Env(), w).PageHost);
+            NetConfig c = NetConfig.Load("{\"page_host\": \"tunnel\"}", null, Env(), w);
+            PaAssert.Equal(NetConfig.PageHostTunnel, c.PageHost);
+            c = NetConfig.Load("{\"page_host\": \"tunnel\"}", "{\"page_host\": \"url\"}", Env(), w);
+            PaAssert.Equal(NetConfig.PageHostUrl, c.PageHost, "the user file wins");
+            c = NetConfig.Load(null, null, Env("IWYK_PAGE_HOST", "tunnel"), w);
+            PaAssert.Equal(NetConfig.PageHostTunnel, c.PageHost);
+            PaAssert.Equal(0, w.Count, string.Join("; ", w));
+            c = NetConfig.Load("{\"page_host\": \"magic\"}", null, Env(), w);
+            PaAssert.Equal(NetConfig.PageHostUrl, c.PageHost);
+            PaAssert.Equal(1, w.Count);
+        }
+
+        [PaTest]
         public static void InvalidValuesAreIgnoredWithWarnings()
         {
             var w = new List<string>();

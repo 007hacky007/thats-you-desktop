@@ -41,5 +41,12 @@
     "sha256_macos-arm64": "000fdfe324acbc9175577fbf2b8f57f6e38334546dacdd3ceaf41e94caf1de9c",
     "url_win-x64": "https://builds.dotnet.microsoft.com/dotnet/Runtime/8.0.34/dotnet-runtime-8.0.34-win-x64.zip",
     "sha256_win-x64": "7c605e2a187cb315d90b6b595358260443df863040d6c95597f8d8a2f2061786"
+  },
+  "cloudflared": {
+    "version": "2026.11.2",
+    "url_macos-arm64": "https://github.com/cloudflare/cloudflared/releases/download/2026.11.2/cloudflared-darwin-arm64.tgz",
+    "sha256_macos-arm64": "f6d58eeec91ad1ec5fd1f7e4a587303772929b2625be5d24068033851c36ff55",
+    "url_win-x64": "https://github.com/cloudflare/cloudflared/releases/download/2026.11.2/cloudflared-windows-amd64.exe",
+    "sha256_win-x64": "555b46c85582461d189cac30d14ad05480d612613801be9f110b8ce08c5b2113"
   }
 }

@@ -50,7 +50,10 @@ namespace PortNet
                     Application.quitting += OnQuitting;
                     s_quitHooked = true;
                 }
-                return engine.Start(LoadConfig(), CertPath);
+                NetConfig config = LoadConfig();
+                bool ok = engine.Start(config, CertPath);
+                PortPageHost.Ensure(engine, config);
+                return ok;
             }
             catch (Exception e)
             {
