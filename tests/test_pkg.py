@@ -140,3 +140,24 @@ class PkgTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PfscLimitsTest(unittest.TestCase):
+    def test_block_that_inflates_past_the_block_size_is_refused(self):
+        bs = BS
+        bomb = zlib.compress(bytes(bs * 64))  # tiny, but inflates to 64 blocks
+        start = 0x30 + 16
+        blob = struct.pack("<4siiiqqQq", b"PFSC", 0, 2, bs, bs, 0x30, start, bs) + \
+            struct.pack("<2q", start, start + len(bomb)) + bomb
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(pfs.PfsError):
+                pfs.decompress_pfsc([blob], Path(d) / "o")
+
+    def test_absurd_table_or_block_sizes_are_refused_before_buffering(self):
+        bs = BS
+        far = struct.pack("<4siiiqqQq", b"PFSC", 0, 2, bs, bs, 1 << 40, 0, bs)
+        huge_block = struct.pack("<4siiiqqQq", b"PFSC", 0, 2, bs, bs, 0x30, 0x40, bs) + struct.pack("<2q", 0x40, 0x40 + bs * 1000)
+        with tempfile.TemporaryDirectory() as d:
+            for blob in (far, huge_block):
+                with self.assertRaises(pfs.PfsError):
+                    pfs.decompress_pfsc([blob], Path(d) / "o")

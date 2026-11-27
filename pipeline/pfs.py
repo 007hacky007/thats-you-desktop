@@ -25,6 +25,9 @@ FLAG_COMPRESSED = 0x1
 T_FILE, T_DIR = 2, 3
 CHUNK = 1 << 22
 PFSC_MAGIC = b"PFSC"
+MAX_IMAGE = 1 << 40  # 1 TB: far above any PS4 game
+MAX_TABLE_OFFSET = 1 << 24
+MAX_STORED_BLOCKS = 2  # a stored block is at most raw size (or a little more for a zero block)
 
 
 class PfsError(Exception):
@@ -271,11 +274,16 @@ def decompress_pfsc(chunks, dst: Path, progress=None) -> int:
 
     need(0x30)
     magic, _u4, _u8, bs, bs2, table, _start, length = struct.unpack_from("<4siiiqqQq", buf, 0)
-    if magic != PFSC_MAGIC or bs != bs2 or bs <= 0:
+    if magic != PFSC_MAGIC or bs != bs2 or not 0x1000 <= bs <= 1 << 20:
         raise PfsError("not a PFSC container")
+    if not 0 < length <= MAX_IMAGE or not 0x30 <= table <= MAX_TABLE_OFFSET:
+        raise PfsError("PFSC container header is out of range")
     n = -(-length // bs)
     need(table + 8 * (n + 1))
     offs = struct.unpack_from(f"<{n + 1}q", buf, table)
+    for i in range(n):
+        if not 0 <= offs[i + 1] - offs[i] <= MAX_STORED_BLOCKS * bs:
+            raise PfsError(f"PFSC block {i} has an impossible size")
     left = length
     with open(dst, "wb") as out:
         for i in range(n):
@@ -290,8 +298,11 @@ def decompress_pfsc(chunks, dst: Path, progress=None) -> int:
             elif size > bs:
                 block = bytes(bs)
             else:
+                d = zlib.decompressobj(15)
                 try:
-                    block = zlib.decompress(raw, 15, bs)
+                    block = d.decompress(raw, bs)  # hard cap: never more than one block
+                    if d.unconsumed_tail or not d.eof:
+                        raise PfsError(f"PFSC block {i} inflates past the block size")
                 except zlib.error as e:
                     raise PfsError(f"PFSC block {i} is damaged ({e})") from None
             want = min(bs, left)
