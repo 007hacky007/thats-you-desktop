@@ -165,6 +165,8 @@ def main(argv=None) -> int:
     ap.add_argument("--keys", default="8:Return,20:Return,30:Return",
                     help="TV key script for the language select and splash (run_player --keys format)")
     ap.add_argument("--headful", action="store_true")
+    ap.add_argument("--page-url", default="", metavar="URL",
+                    help="phones open this page address (for example a tunnel) instead of the local test server")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--player-args", default="", metavar="ARGS",
                     help='extra game arguments, e.g. "-portFxAB ScreenSpaceReflection"')
@@ -181,6 +183,9 @@ def main(argv=None) -> int:
         return 2
     run_dir.mkdir(parents=True, exist_ok=True)
     server, base = web_serve.start_background(web_common.web_dist(cfg))
+    local_port = int(base.rstrip("/").rsplit(":", 1)[1])
+    if a.page_url:
+        base = a.page_url
     join_file = run_dir / "join-url.txt"
     os.environ["IWYK_PAGE_URL"] = base  # the player inherits it; local test only
     exe = run_player.find_executable(c.work_dir / "builds" / "mac" / "ThatsYou.app")
@@ -221,7 +226,7 @@ def main(argv=None) -> int:
         if a.android is not None:
             from pipeline import android_phone
             droid = android_phone.AndroidPhone(a.android or None)
-            droid.prepare(int(base.rstrip("/").rsplit(":", 1)[1]))
+            droid.prepare(local_port)
             i = len(phones)
             phones.append(Phone(i, droid.open(url, run_dir / f"page-phone{i + 1}.log"), run_dir / "phones", rng))
             log(f"phone {i + 1} is Android Chrome")
