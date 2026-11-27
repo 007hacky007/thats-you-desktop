@@ -110,7 +110,7 @@ class WindowTest(unittest.TestCase):
             w.out_edit.setText(d)
             w.start_build()
             deadline = time.time() + 10
-            while w.progress.value() < 100 and time.time() < deadline:
+            while not w.open_game.isEnabled() and time.time() < deadline:  # wait for "finished", not 100 %
                 self.app.processEvents()
                 time.sleep(0.01)
             self.assertEqual(w.progress.value(), 100)
