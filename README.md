@@ -70,35 +70,38 @@ The menus on the computer are controlled with the keyboard. The on-screen hints 
 
 ## Getting started
 
-There is no ready-made download yet: you build the game yourself from your copy, with the scripts in this repository. It takes some setup, and then about an hour of the computer working on its own.
+You build the game yourself from your own copy, with a small builder app. You choose your files, and the computer does the rest in about an hour.
 
-1. **Get your game files.** Make a backup of your PS4 copy of That's You! together with its update, as decrypted folders. Tested with the European release CUSA08389 and update 1.05; other regions may work but are untested. Also get the Android app's APK file (`com.playstation.iwyk`, version 1.6): the phone page takes its look and translations from it. If you really cannot get it, the builder can continue without it, but then the phones show a plain English-only page without the original art, and that mode is not really tested.
-2. **Install the tools** listed in [What you need](#what-you-need).
-3. **Tell the scripts where everything is.** Copy `config/local.example.json` to `config/local.json` and fill in the paths.
-4. **Put the phone page online.** The phone controller is a small web page that has to be reachable over HTTPS, for example on a free Cloudflare account. The scripts upload it for you.
-5. **Build:**
+<p align="center">
+  <img src="screenshots/builder.png" width="600" alt="The builder app: choose your game and its update">
+</p>
 
-   ```sh
-   python3 -m pipeline.build_all        # unpacks your game into a Unity project (about an hour)
-   python3 -m pipeline.build_native     # network library
-   python3 -m pipeline.build_player     # the game: work/builds/mac/ThatsYou.app
-   python3 -m pipeline.deploy_web --build   # the phone page
-   ```
+1. **Get your game files.** A backup of your PS4 copy of That's You! and its update, as folders or as decrypted backup `.pkg` files. Tested with the European release CUSA08389 and update 1.05; other regions may work but are untested.
+2. **Get the phone app.** The Android app's APK file, version 1.6 (`com.playstation.iwyk`). The phones take their look and translations from it; the builder's **Find it** button helps you search. If you really cannot get it, the builder can continue without it, but then the phones show a plain English-only page without the original art, and that mode is not really tested.
+3. **Install Unity Hub** from [unity.com/download](https://unity.com/download) and sign in to it with a free Unity account. The builder installs the right Unity version by itself.
+4. **Download the builder** from the [latest release](../../releases/latest): `ThatsYou-Builder-macOS.dmg` for a Mac, `ThatsYou-Builder-Windows.exe` for a PC.
+   - Mac: open the DMG, drag the builder to Applications, then right-click it and choose **Open** the first time (it is not notarized).
+   - Windows: if SmartScreen warns you, choose **More info** and then **Run anyway**.
+5. **Run it.** Choose your game, its update and the APK, pick how the phone page gets online, and press **Build the game**. You can close the builder at any time; it continues where it stopped.
+6. **Play.** Open the game from the folder you chose.
 
-6. **Play.** Open `work/builds/mac/ThatsYou.app`. For Windows, add `python3 -m pipeline.build_player --target win` and copy the `work/builds/win` folder to the PC.
+**The phone page** is the web page the phones play on. The builder offers two ways to put it online:
 
-The details of every step are in [docs/DEVELOPERS.md](docs/DEVELOPERS.md).
+- **The free Cloudflare tunnel** (the default): nothing to set up. Each time the game starts, it puts the page online by itself, so the computer needs internet then. The QR code appears a few seconds after the main menu.
+- **Your own Cloudflare account**: the page gets a fixed address on your free account. You only sign in once in your browser; the builder does everything else.
+
+Building from the command line, without the app, is described in [docs/DEVELOPERS.md](docs/DEVELOPERS.md).
 
 ## What you need
 
 | | |
 | --- | --- |
-| To build | A Mac with Apple silicon (M1 or later). It builds the Windows version too. |
-| Tools | Unity 6000.6.10f1 (free, via Unity Hub), Python 3.11+, Go, cmake, .NET runtime, Node.js |
+| To build | A Mac with Apple silicon (M1 or later), or a Windows 10/11 PC (experimental). Each builds the game for itself. |
+| Software | Unity Hub with a free Unity account. Everything else is downloaded by the builder. |
 | Disk space | About 60 GB while building, about 7 GB for the finished game |
 | To play | A Mac with Apple silicon, or a Windows 10/11 PC (experimental) |
 | Phones | Any recent iPhone or Android phone with a camera: Safari 16.4+ or Chrome |
-| Network | Phones and computer on the same Wi-Fi |
+| Network | Phones and computer on the same Wi-Fi, and internet when the game starts (for the free tunnel) |
 
 ## Questions
 
@@ -108,7 +111,7 @@ The details of every step are in [docs/DEVELOPERS.md](docs/DEVELOPERS.md).
 
 **Can I use a game controller?** The PS4 controller mapping for PC pads is experimental and untested. The keyboard always works.
 
-**Do the phones need internet?** Only to open the page the first time. During the game they talk directly to the computer over your Wi-Fi.
+**Do the phones need internet?** To open the page, yes. During the game they talk directly to the computer over your Wi-Fi.
 
 **A phone says "Could not join because the game has already started".** Players can only join before the game starts. Finish or quit the game, and everybody joins from the main menu.
 
@@ -116,7 +119,7 @@ The details of every step are in [docs/DEVELOPERS.md](docs/DEVELOPERS.md).
 
 ## Česky
 
-That's You! je party hra pro PS4, ve které se 2 až 6 hráčů na mobilech ptá jeden na druhého, kreslí a fotí. Původní aplikace pro telefony zmizela z obchodů, takže hra přestala jít hrát. Tento projekt ji vrací: hra běží přímo na Macu s Apple silicon (a zkušebně na Windows) a telefony nepotřebují žádnou aplikaci. Stačí naskenovat QR kód na obrazovce a ovladač se otevře v prohlížeči, na iPhonu i Androidu, včetně živých efektů kamery. Hra sama v repozitáři není: skripty ji sestaví z tvé vlastní zálohy PS4 hry. Postup je v části [Getting started](#getting-started).
+That's You! je party hra pro PS4, ve které se 2 až 6 hráčů na mobilech ptá jeden na druhého, kreslí a fotí. Původní aplikace pro telefony zmizela z obchodů, takže hra přestala jít hrát. Tento projekt ji vrací: hra běží přímo na Macu s Apple silicon (a zkušebně na Windows) a telefony nepotřebují žádnou aplikaci. Stačí naskenovat QR kód na obrazovce a ovladač se otevře v prohlížeči, na iPhonu i Androidu, včetně živých efektů kamery. Hra sama v repozitáři není: skripty ji sestaví z tvé vlastní zálohy PS4 hry. Hru sestavíš aplikací ze stránky [Releases](../../releases/latest); postup je v části [Getting started](#getting-started).
 
 ## For developers
 

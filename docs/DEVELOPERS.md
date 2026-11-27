@@ -97,6 +97,24 @@ Keep the address to yourself. It is never written into this repository, and the 
 
 The page works offline once loaded, keeps the phone screen on while playing, and reconnects by itself after a short network drop.
 
+## Builder app
+
+`builder/` is the player-facing app (PySide6). It runs the same pipeline as the commands above, with its own config file (`IWYK_CONFIG`, written into the work folder) and with the tools that otherwise need a compiler taken from a bundled `prebuilt/` folder (`IWYK_PREBUILT_DIR`: `native/<platform>/iwyknet.*`, and `vgmstream-cli` on macOS).
+
+- Window: `python3 -m builder` (needs PySide6). Without a window: `python3 -m builder --base X --update Y --apk Z --host tunnel|account --out DIR [--work DIR] [--try-untested] [--no-apk]`.
+- Steps (`builder/steps.py`): inputs, unity, merge, extract-game, extract-app, project, phone-page, hosting, player, finish. Finished steps are recorded in `<work>/builder-state.json` and skipped on the next start; a lock file keeps a second builder out of the same work folder.
+- Inputs (`pipeline/inputs.py`, `pipeline/pkg.py`, `pipeline/pfs.py`): game folders or decrypted backup `.pkg` files (read by our own code; every block is checked against its signature or checksum), title and version check, APK checked by its SHA-256.
+- Unity (`pipeline/unity_install.py`): the editor is found in Unity Hub's folders or installed through Hub's headless mode; the licence is checked with a throwaway batch-mode project before the long import.
+- Packaging: `work/venv-builder/bin/python -m builder.package --prebuilt DIR` (a venv with PySide6, cryptography, pyinstaller, Pillow) makes the DMG or the EXE in `work/package`, with a `.sha256`. The packaged app checks itself with `--self-test`.
+- Releases: pushing a `v*` tag runs `.github/workflows/release.yml`, which builds both apps on GitHub's macOS and Windows runners and attaches them to a draft release. Publish the draft after checking it.
+
+### Phone page modes
+
+`page_host` in `iwyk-net.json` (and in `config/local.json`):
+
+- `"tunnel"` (default when no `phone_page_url` is set): the game serves `PhonePage/` next to it and publishes it with the bundled `cloudflared` as a Cloudflare quick tunnel. The address is shown only after it resolves through DNS-over-HTTPS and serves the page (about 15 s). A tunnel left over by a crash is ended at the next start.
+- `"url"`: phones open `phone_page_url`, for example a Worker deployed with `python3 -m pipeline.deploy_web` or with the builder's account option (`python3 -m pipeline.cf_account --deploy`, pinned wrangler installed with `npm ci --ignore-scripts` from `pipeline/wrangler/package-lock.json`).
+
 ## Tests
 
 ```sh
