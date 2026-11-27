@@ -11,7 +11,8 @@ release contains nothing from the game or the app.
 
 - One window, a few steps, a progress bar, resumable. Builds the game for the system it runs on.
 - Game input: the PS4 base game and its update, each as a folder or a .pkg.
-- App input (required): the Android APK; the phone page takes its art, fonts and translations from it.
+- App input (strongly recommended): the Android APK; the phone page takes its art, fonts and
+  translations from it. An opt-in checkbox allows building without it.
 - Phone page hosting without accounts by default, with a one-sign-in Cloudflare option.
 
 ## Non-goals
@@ -29,11 +30,14 @@ release contains nothing from the game or the app.
    clear message if their code differs. A .pkg is unpacked with a pinned
    PkgTool.Core release (LibOrbisPkg), downloaded on demand and checked by SHA-256. The
    title (CUSA08389) and the update version are checked before anything else runs.
-2. **Phone app (required).** Drop the APK. "Find it" opens
+2. **Phone app.** Drop the APK (strongly recommended). "Find it" opens
    `https://www.google.com/search?q=site%3Awww.apkmirror.com+thats+you+1.6+apk+download`.
    The file must match version 1.6 (1623), SHA-256
    `6bf13282cd189e3a960e56fff0f8f5acd1e4460d831d0c21ee022c55889379d5`; anything else is
-   rejected with a clear message.
+   rejected with a clear message. Players who cannot get it may tick "Continue without the
+   app (not recommended)". The disclaimer next to it: only use this if you cannot get the APK;
+   the phone page then has no original art, is in English only, and this mode has not been
+   really tested. The build then makes the neutral page.
 3. **Phone page.** Two choices:
    - *Use the free Cloudflare tunnel* (default). Nothing to do now.
    - *I have a Cloudflare account.* The builder fetches a portable Node.js and wrangler

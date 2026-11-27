@@ -72,7 +72,7 @@ The menus on the computer are controlled with the keyboard. The on-screen hints 
 
 There is no ready-made download yet: you build the game yourself from your copy, with the scripts in this repository. It takes some setup, and then about an hour of the computer working on its own.
 
-1. **Get your game files.** Make a backup of your PS4 copy of That's You! together with its update, as decrypted folders. Tested with the European release CUSA08389 and update 1.05; other regions may work but are untested. Also get the Android app's APK file (`com.playstation.iwyk`, version 1.6): the phone page takes its look and translations from it.
+1. **Get your game files.** Make a backup of your PS4 copy of That's You! together with its update, as decrypted folders. Tested with the European release CUSA08389 and update 1.05; other regions may work but are untested. Also get the Android app's APK file (`com.playstation.iwyk`, version 1.6): the phone page takes its look and translations from it. If you really cannot get it, the builder can continue without it, but then the phones show a plain English-only page without the original art, and that mode is not really tested.
 2. **Install the tools** listed in [What you need](#what-you-need).
 3. **Tell the scripts where everything is.** Copy `config/local.example.json` to `config/local.json` and fill in the paths.
 4. **Put the phone page online.** The phone controller is a small web page that has to be reachable over HTTPS, for example on a free Cloudflare account. The scripts upload it for you.
