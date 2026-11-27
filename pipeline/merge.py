@@ -64,6 +64,10 @@ def _place_file(src: Path, dst: Path) -> bool:
     return False
 
 
+class MergeError(Exception):
+    pass
+
+
 def merge(base: Path, patch: Path, out: Path) -> MergeResult:
     base, patch, out = Path(base), Path(patch), Path(out)
     plan = _plan(base, patch)
@@ -83,6 +87,9 @@ def merge(base: Path, patch: Path, out: Path) -> MergeResult:
     cloned = True
     for rel, (src, _origin) in plan.items():
         cloned &= _place_file(src, tmp / rel)
+    have = sum(len(files) for _d, _s, files in os.walk(tmp))
+    if have != len(plan):  # something deleted files meanwhile (another builder, a full disk)
+        raise MergeError(f"merge produced {have} of {len(plan)} files; run it again")
     (tmp / MANIFEST).write_text(json.dumps({"digest": digest, "files": len(plan), "from_patch": from_patch}))
     if out.exists():
         shutil.rmtree(out)

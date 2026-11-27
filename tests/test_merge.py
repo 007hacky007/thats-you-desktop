@@ -93,3 +93,21 @@ class MergeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MergeCountTests(MergeTests):
+    def test_files_vanishing_during_the_copy_fail_the_merge(self):
+        real = merge._place_file
+        calls = []
+
+        def flaky(src, dst):
+            calls.append(dst)
+            r = real(src, dst)
+            if len(calls) == 2:  # something else deletes a copied file before the merge finishes
+                Path(calls[0]).unlink()
+            return r
+
+        with mock.patch.object(merge, "_place_file", side_effect=flaky):
+            with self.assertRaises(merge.MergeError):
+                merge.merge(self.base, self.patch, self.out)
+        self.assertFalse((self.out / merge.MANIFEST).exists(), "an incomplete merge is never marked done")
