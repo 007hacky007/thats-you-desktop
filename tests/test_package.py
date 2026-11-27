@@ -40,3 +40,11 @@ class DataFilesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LaunchTest(unittest.TestCase):
+    def test_worker_processes_of_the_packaged_app_do_not_rerun_the_builder(self):
+        # the audio step uses spawn worker processes; in a frozen app they start the app itself
+        src = (REPO / "builder" / "launch.py").read_text()
+        self.assertIn("multiprocessing.freeze_support()", src)
+        self.assertLess(src.index("freeze_support()"), src.index("main()"))
