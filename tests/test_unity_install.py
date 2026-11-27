@@ -74,6 +74,12 @@ class HubTest(unittest.TestCase):
         bad = mock.Mock(returncode=0, stdout="NotSigned|\n", stderr="")
         self.assertTrue(unity_install.signed_by_unity(Path("C:/x.exe"), "win32", run=lambda a, **k: good))
         self.assertFalse(unity_install.signed_by_unity(Path("C:/x.exe"), "win32", run=lambda a, **k: bad))
+        for subject in ("CN=Evil, O=Unity Technologies Fake Ltd", "CN=O=Unity Technologies SF, O=Evil",
+                        "CN=x, OU=Unity Technologies SF, O=Evil"):
+            fake = mock.Mock(returncode=0, stdout="Valid|" + subject + "\n", stderr="")
+            self.assertFalse(unity_install.signed_by_unity(Path("C:/x.exe"), "win32", run=lambda a, **k: fake), subject)
+        quoted = mock.Mock(returncode=0, stdout='Valid|CN="Unity Technologies SF", O="Unity Technologies SF", C=US\n', stderr="")
+        self.assertTrue(unity_install.signed_by_unity(Path("C:/x.exe"), "win32", run=lambda a, **k: quoted))
 
 
 if __name__ == "__main__":

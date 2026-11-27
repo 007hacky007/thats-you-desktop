@@ -20,6 +20,7 @@ from pathlib import Path
 from pipeline import unity
 
 UNITY_TEAM_ID = "9QW8UQUTAA"  # Unity Technologies SF, Apple Developer ID
+UNITY_ORGS = {"Unity Technologies SF", "Unity Technologies ApS"}  # exact O= of Unity's Windows certificates
 HUB_URLS = {
     "darwin": "https://public-cdn.cloud.unity3d.com/hub/prod/UnityHubSetup-arm64.dmg",
     "win32": "https://public-cdn.cloud.unity3d.com/hub/prod/UnityHubSetup-x64.exe",
@@ -78,9 +79,25 @@ def signed_by_unity(path: Path, plat: str | None = None, run=subprocess.run) -> 
         r = run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], capture_output=True, text=True,
                 env=dict(os.environ, IWYK_SIGNED_FILE=str(path)))
         status, _, subject = (r.stdout or "").strip().partition("|")
-        return status == "Valid" and "O=Unity Technologies" in subject
+        return status == "Valid" and organisation(subject) in UNITY_ORGS
     except OSError:
         return False
+
+
+def organisation(subject: str) -> str | None:
+    """The O= value of an X.500 subject such as 'CN=x, O="Unity Technologies SF", C=US' (exact)."""
+    rdns, cur, quoted = [], "", False
+    for ch in subject:
+        if ch == '"':
+            quoted = not quoted
+        elif ch == "," and not quoted:
+            rdns.append(cur.strip())
+            cur = ""
+            continue
+        cur += ch
+    rdns.append(cur.strip())
+    orgs = [r[2:].strip().strip('"') for r in rdns if r.startswith("O=")]
+    return orgs[0] if len(orgs) == 1 else None
 
 
 def download_hub_installer(dest_dir: Path, plat: str | None = None, run=subprocess.run) -> Path:
