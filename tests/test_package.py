@@ -17,6 +17,7 @@ class DataFilesTest(unittest.TestCase):
         self.assertTrue(any(d.startswith("unity/Port/") for d in dests))
         self.assertIn("pipeline/versions.json", dests)
         self.assertIn("pipeline/wrangler/package-lock.json", dests)
+        self.assertIn("pipeline/guid_table.json", dests)
         self.assertIn("native/iwyknet/unity/iwyknet.dylib.meta", dests)
         for bad in ("work/", "local-patches/", "config/local.json", "web/test/", "tests/", ".git/"):
             self.assertFalse(any(d.startswith(bad) for d in dests), bad)

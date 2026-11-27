@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 
-from pipeline import assetripper, config
+from pipeline import assetripper, config, guid_align
 from pipeline.merge import _place_file
 
 GAME_SETTINGS = {
@@ -48,6 +48,8 @@ def main() -> None:
     merged_manifest = (c.work_dir / "merged" / ".merge-manifest.json").read_text()
     key = hashlib.sha256((merged_manifest + json.dumps(GAME_SETTINGS, sort_keys=True)).encode()).hexdigest()
     assetripper.export(media, out, GAME_SETTINGS, exe=assetripper.default_exe(c.work_dir), key=key)
+    # AssetRipper picks most GUIDs anew on every export; the port refers to the verified export's
+    guid_align.ensure(out / "ExportedProject", log=print)
     n = clone_streaming_assets(media, out / "ExportedProject")
     print(f"exported to {out}, {n} StreamingAssets files")
 
