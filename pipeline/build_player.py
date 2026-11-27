@@ -127,8 +127,14 @@ def install_audio(work_dir: Path, project: Path, install=None, log=print) -> dic
 
 def install_native(work_dir: Path, project: Path, log=print) -> None:
     """Build iwyknet (the phones' WebRTC endpoint) and install it into the project."""
+    import os
     from pipeline import build_native
 
+    pre = os.environ.get("IWYK_PREBUILT_DIR")
+    if pre and (Path(pre) / "native").is_dir():  # the builder app ships the library prebuilt
+        log("native: using the prebuilt iwyknet")
+        build_native.install(Path(pre) / "native", project)
+        return
     out = work_dir / "native"
     for plat in build_native.PLATFORMS:
         r = build_native.build(plat, out)

@@ -2,6 +2,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from pipeline import build_player
@@ -187,3 +188,20 @@ class PageHostInstallTest(unittest.TestCase):
             self.assertFalse((out / "PhonePage" / "stale.txt").exists())
             self.assertEqual((out / "cloudflared").read_text(), "bin")
             self.assertTrue(os.access(out / "cloudflared", os.X_OK))
+
+
+class PrebuiltNativeTest(unittest.TestCase):
+    def test_prebuilt_library_skips_the_go_build(self):
+        import tempfile
+        from pipeline import build_player, build_native
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            pre = d / "prebuilt"
+            (pre / "native" / "macos-arm64").mkdir(parents=True)
+            (pre / "native" / "macos-arm64" / "iwyknet.dylib").write_text("lib")
+            installed = []
+            with mock.patch.dict(os.environ, {"IWYK_PREBUILT_DIR": str(pre)}), \
+                    mock.patch.object(build_native, "build", side_effect=AssertionError("no Go build")), \
+                    mock.patch.object(build_native, "install", side_effect=lambda src, proj: installed.append(src)):
+                build_player.install_native(d / "work", d / "project", log=lambda m: None)
+            self.assertEqual(installed, [pre / "native"])
