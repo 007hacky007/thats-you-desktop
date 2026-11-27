@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -230,7 +231,8 @@ func TestThreeClientsGetSessions(t *testing.T) {
 		if len(evs) < 2 || evs[0].Kind != server.EventOpened || evs[1].Kind != server.EventText {
 			t.Fatalf("session %d order: %s", sid, describe(evs))
 		}
-		if !strings.HasPrefix(string(evs[0].Data), "127.0.0.1:") {
+		// the peer's address: loopback, or the host's LAN address when ICE picks that pair
+		if host, port, err := net.SplitHostPort(string(evs[0].Data)); err != nil || net.ParseIP(host).To4() == nil || port == "" {
 			t.Fatalf("opened payload %q", evs[0].Data)
 		}
 		var h map[string]string

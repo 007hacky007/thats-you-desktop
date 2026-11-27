@@ -848,7 +848,6 @@ def main(argv: list[str] | None = None) -> int:
     from pipeline import config
 
     a = build_parser().parse_args(join_extra_values(sys.argv[1:] if argv is None else list(argv)))
-    c = config.load()
     try:
         keys = validate_keys(a.keys) if a.keys else None
         if (a.fx_only or a.fx_keep) and not a.no_image_effects:
@@ -857,6 +856,9 @@ def main(argv: list[str] | None = None) -> int:
         fx_keep = validate_types(a.fx_keep) if a.fx_keep else None
         shot_interval = validate_shot_interval(a.shot_interval) if a.shot_interval is not None else None
         extra = split_extra(a.extra)
+        if (a.fx_only or a.fx_keep) and not a.no_image_effects:  # checked before any config is read
+            raise ValueError("--fx-only / --fx-keep need --no-image-effects")
+        c = config.load()
         exe = find_executable(a.app or c.work_dir / "builds" / "mac" / "ThatsYou.app")
     except (ValueError, FileNotFoundError) as e:
         print(e, file=sys.stderr)

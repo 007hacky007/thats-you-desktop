@@ -17,3 +17,5 @@ local-patches/
 /ProjectSettings/
 /Packages/
 obj/
+builder/assets/icon.icns
+builder/assets/icon.ico
