@@ -44,9 +44,14 @@ class ConfigTests(unittest.TestCase):
         self.assertIsNone(c.unity_editor)
         self.assertIsNone(c.phone_page_url)
 
-    def test_missing_key_names_key(self):
+    def test_no_apk_is_the_opt_in_fallback(self):
         data = make_inputs(self.root)
         del data["apk"]
+        self.assertIsNone(config.load(self.write(data)).apk)
+
+    def test_missing_apk_file_names_key(self):
+        data = make_inputs(self.root)
+        data["apk"] = str(self.root / "gone.apk")
         with self.assertRaises(ConfigError) as cm:
             config.load(self.write(data))
         self.assertEqual(cm.exception.key, "apk")

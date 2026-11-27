@@ -83,6 +83,9 @@ def run_il2cppdumper(apk_dir: Path, tool_dir: Path, out: Path) -> None:
 
 def main() -> None:
     c = config.load()
+    if c.apk is None:
+        print("no APK configured: skipping the phone app (the phone page will be the neutral one)")
+        return
     apk_dir = c.work_dir / "apk"
     unzip_apk(c.apk, apk_dir)
     run_il2cppdumper(apk_dir, tools.ensure("il2cppdumper", c.work_dir), c.work_dir / "export" / "app-il2cpp")

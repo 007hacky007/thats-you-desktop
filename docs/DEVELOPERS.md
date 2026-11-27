@@ -20,7 +20,7 @@ This repository contains no game or app files and no code taken from them. Every
 - The Android APK of the companion app (`com.playstation.iwyk`), for the phone page's original art, fonts and texts. Without it the page still works with plain styling.
 - A Mac with Apple silicon for building (the Windows game is built on the Mac too).
 - Unity 6000.6.10f1 (install it with Unity Hub; add "Windows Build Support (Mono)" for the Windows build).
-- Python 3.11 or newer, Go 1.27 or newer, cmake, the .NET runtime (`dotnet`), Node.js 20 or newer.
+- Python 3.11 or newer with the `cryptography` package (`pip install cryptography`, used to read .pkg backups), Go 1.27 or newer, cmake, the .NET runtime (`dotnet`), Node.js 20 or newer.
 - For the Windows build: a mingw-w64 cross compiler (`brew install mingw-w64`) or `zig`.
 - Google Chrome for the automated tests.
 - Somewhere to host the phone page over HTTPS: a Cloudflare account (free tier is enough), or your own web server.

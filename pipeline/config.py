@@ -20,7 +20,7 @@ class ConfigError(Exception):
 class Config:
     base_dump: Path
     patch_dump: Path
-    apk: Path
+    apk: Path | None  # None: built without the app (opt-in fallback, neutral phone page)
     work_dir: Path
     unity_editor: Path | None
     phone_page_url: str | None
@@ -47,11 +47,11 @@ def load(path: Path | None = None) -> Config:
     patch = _required_dir(data, "patch_dump")
     if patch.resolve() == base.resolve() or not (patch / "sce_sys" / "changeinfo").is_dir():
         raise ConfigError("patch_dump", f"{patch} is not a patch dump (no sce_sys/changeinfo)")
-    if not data.get("apk"):
-        raise ConfigError("apk", "missing")
-    apk = Path(data["apk"]).expanduser()
-    if not apk.is_file():
-        raise ConfigError("apk", f"file not found: {apk}")
+    apk = None
+    if data.get("apk"):
+        apk = Path(data["apk"]).expanduser()
+        if not apk.is_file():
+            raise ConfigError("apk", f"file not found: {apk}")
 
     work = Path(data["work_dir"]).expanduser() if data.get("work_dir") else REPO_ROOT / "work"
     unity = Path(data["unity_editor"]).expanduser() if data.get("unity_editor") else None
