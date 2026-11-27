@@ -11,7 +11,7 @@ release contains nothing from the game or the app.
 
 - One window, a few steps, a progress bar, resumable. Builds the game for the system it runs on.
 - Game input: the PS4 base game and its update, each as a folder or a .pkg.
-- App input (optional): the Android APK, for the original phone page look.
+- App input (required): the Android APK; the phone page takes its art, fonts and translations from it.
 - Phone page hosting without accounts by default, with a one-sign-in Cloudflare option.
 
 ## Non-goals
@@ -23,14 +23,17 @@ release contains nothing from the game or the app.
 
 ## Builder steps
 
-1. **Game.** Pick base and update, folder or .pkg. A .pkg is unpacked with a pinned
+1. **Game.** Pick base and update, folder or .pkg. Tested and supported: the European release
+   EP9000-CUSA08389, base 01.00 and update 01.05. Other regions (the North American release is
+   CUSA06348) are offered as "untested, try anyway"; the hash-guarded game edits stop with a
+   clear message if their code differs. A .pkg is unpacked with a pinned
    PkgTool.Core release (LibOrbisPkg), downloaded on demand and checked by SHA-256. The
    title (CUSA08389) and the update version are checked before anything else runs.
-2. **Phone app (optional).** Drop the APK or skip. "Find it" opens
+2. **Phone app (required).** Drop the APK. "Find it" opens
    `https://www.google.com/search?q=site%3Awww.apkmirror.com+thats+you+1.6+apk+download`.
    The file must match version 1.6 (1623), SHA-256
    `6bf13282cd189e3a960e56fff0f8f5acd1e4460d831d0c21ee022c55889379d5`; anything else is
-   rejected with a clear message. Skipping gives the neutral page.
+   rejected with a clear message.
 3. **Phone page.** Two choices:
    - *Use the free Cloudflare tunnel* (default). Nothing to do now.
    - *I have a Cloudflare account.* The builder fetches a portable Node.js and wrangler
@@ -84,4 +87,5 @@ release contains nothing from the game or the app.
 
 ## Left to the builder (implementer)
 
+Icon: original artwork for this project (no game imagery), used for the window, app, EXE and DMG.
 Window layout and wording, PyInstaller specifics, CI runner details, exact pins.
